@@ -1,3 +1,10 @@
-.env
-credentials.json
+venv/
 __pycache__/
+*.pyc
+.env
+imagenes_pesajes/
+*.md
+test_drive.py
+migrar_bd.py
+crear_tabla_silos.sql
+credentials.json

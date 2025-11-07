@@ -190,14 +190,24 @@ async def release_db_connection(conn):
 class RegistroState(StatesGroup):
     menu_principal = State()  # Menú inicial
     cedula = State()
+    confirmar_cedula = State()
     camion = State()
+    confirmar_camion = State()
     tipo = State()
+    confirmar_tipo = State()
     peso_origen = State()
+    confirmar_peso_origen = State()
     peso_bascula_destino = State()
+    confirmar_peso_bascula = State()
     silo_num = State()
     silo_peso = State()
+    confirmar_silo_peso = State()  # Confirmar peso de silo
     foto = State()
     consulta_silo = State()  # Para consultar capacidad de silos
+    restar_silo = State()  # Para restar peso de silos
+    restar_silo_numero = State()
+    restar_silo_peso = State()
+    confirmar_restar_peso = State()  # Confirmar peso a restar
 
 # ==================== VALIDACIONES ==================== #
 def validar_cedula(valor):
@@ -209,10 +219,34 @@ def validar_placa(valor):
 def validar_peso(valor):
     return re.fullmatch(r"^\d+(,\d+)?$", valor)
 
+async def volver_menu_principal(message: types.Message, state: FSMContext):
+    """Función helper para volver al menú principal"""
+    await state.clear()
+    await message.answer(
+        "👋 Bienvenido al sistema de pesajes.\n\n"
+        "¿Qué desea hacer?\n\n"
+        "1️⃣ Registrar Pesaje\n"
+        "2️⃣ Consultar Capacidad de Silos\n"
+        "3️⃣ Restar Peso de Silo\n\n"
+        "Escriba el número de la opción:\n\n"
+        "💡 _Escriba 0 en cualquier momento para cancelar_",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.menu_principal)
+
 # ==================== CONFIGURAR BOT ==================== #
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+
+# ==================== HANDLER GLOBAL PARA CANCELAR ==================== #
+@dp.message(F.text == "0")
+async def cancelar_operacion(message: types.Message, state: FSMContext):
+    """Permite al usuario cancelar en cualquier momento escribiendo 0"""
+    current_state = await state.get_state()
+    if current_state and current_state != RegistroState.menu_principal:
+        await message.answer("❌ Operación cancelada.")
+        await volver_menu_principal(message, state)
 
 # ==================== FLUJO DE BOT ==================== #
 @dp.message(CommandStart())
@@ -221,8 +255,11 @@ async def start(message: types.Message, state: FSMContext):
         "👋 Bienvenido al sistema de pesajes.\n\n"
         "¿Qué desea hacer?\n\n"
         "1️⃣ Registrar Pesaje\n"
-        "2️⃣ Consultar Capacidad de Silos\n\n"
-        "Escriba el número de la opción:"
+        "2️⃣ Consultar Capacidad de Silos\n"
+        "3️⃣ Restar Peso de Silo\n\n"
+        "Escriba el número de la opción:\n\n"
+        "💡 _Escriba 0 en cualquier momento para cancelar_",
+        parse_mode="Markdown"
     )
     await state.set_state(RegistroState.menu_principal)
 
@@ -236,6 +273,11 @@ async def iniciar_registro(message: types.Message, state: FSMContext):
 async def consultar_silos(message: types.Message, state: FSMContext):
     await message.answer("Ingrese el número del silo que desea consultar:")
     await state.set_state(RegistroState.consulta_silo)
+
+@dp.message(RegistroState.menu_principal, F.text == "3")
+async def restar_peso_silo(message: types.Message, state: FSMContext):
+    await message.answer("Ingrese el número del silo del cual desea restar peso:")
+    await state.set_state(RegistroState.restar_silo_numero)
 
 @dp.message(RegistroState.consulta_silo)
 async def mostrar_capacidad_silo(message: types.Message, state: FSMContext):
@@ -295,10 +337,95 @@ async def mostrar_capacidad_silo(message: types.Message, state: FSMContext):
     await message.answer(
         "\n¿Desea hacer algo más?\n\n"
         "1️⃣ Registrar Pesaje\n"
-        "2️⃣ Consultar Capacidad de Silos\n\n"
+        "2️⃣ Consultar Capacidad de Silos\n"
+        "3️⃣ Restar Peso de Silo\n\n"
         "Escriba el número de la opción:"
     )
     await state.set_state(RegistroState.menu_principal)
+
+# ==================== RESTAR PESO DE SILO ==================== #
+@dp.message(RegistroState.restar_silo_numero)
+async def get_numero_silo_restar(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("⚠️ Por favor ingrese un número de silo válido.")
+        return
+    
+    await state.update_data(silo_a_restar=int(message.text))
+    await message.answer(f"¿Cuánto peso desea restar del Silo {message.text}? (en kg):")
+    await state.set_state(RegistroState.restar_silo_peso)
+
+@dp.message(RegistroState.restar_silo_peso)
+async def pedir_confirmacion_restar(message: types.Message, state: FSMContext):
+    if not validar_peso(message.text):
+        await message.answer("⚠️ Ingrese un peso válido (use coma para decimales).")
+        return
+    
+    data = await state.get_data()
+    silo_numero = data.get('silo_a_restar')
+    await state.update_data(peso_a_restar_temporal=message.text)
+    
+    await message.answer(
+        f"⚖️ Restar *{message.text} kg* del Silo {silo_numero}\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.confirmar_restar_peso)
+
+@dp.message(RegistroState.confirmar_restar_peso, F.text == "1")
+async def restar_peso_del_silo(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    silo_numero = data.get('silo_a_restar')
+    peso_str = data.get('peso_a_restar_temporal')
+    peso_a_restar = float(peso_str.replace(",", "."))
+    
+    conn = None
+    try:
+        conn = await get_db_connection()
+        if conn:
+            # Insertar un registro negativo para restar del total
+            await conn.execute('''
+                INSERT INTO silos (registro_id, numero_silo, peso, fecha)
+                VALUES (NULL, $1, $2, NOW())
+            ''', silo_numero, -peso_a_restar)
+            
+            # Consultar el nuevo total
+            total_actual = await conn.fetchval('''
+                SELECT COALESCE(SUM(peso), 0) FROM silos WHERE numero_silo = $1
+            ''', silo_numero)
+            
+            await message.answer(
+                f"✅ Se restaron {peso_a_restar} kg del Silo {silo_numero}\n\n"
+                f"📦 Capacidad actual del Silo {silo_numero}: {total_actual:.1f} kg"
+            )
+            
+    except Exception as e:
+        print(f"⚠️ Error restando peso: {e}")
+        import traceback
+        traceback.print_exc()
+        await message.answer("⚠️ Error al actualizar la base de datos")
+    finally:
+        if conn:
+            await release_db_connection(conn)
+    
+    # Volver al menú principal
+    await message.answer(
+        "\n¿Desea hacer algo más?\n\n"
+        "1️⃣ Registrar Pesaje\n"
+        "2️⃣ Consultar Capacidad de Silos\n"
+        "3️⃣ Restar Peso de Silo\n\n"
+        "Escriba el número de la opción:"
+    )
+    await state.set_state(RegistroState.menu_principal)
+
+@dp.message(RegistroState.confirmar_restar_peso, F.text == "2")
+async def editar_restar_peso(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    silo_numero = data.get('silo_a_restar')
+    await message.answer(f"¿Cuánto peso desea restar del Silo {silo_numero}? (en kg):")
+    await state.set_state(RegistroState.restar_silo_peso)
 
 @dp.message(RegistroState.cedula)
 async def get_cedula(message: types.Message, state: FSMContext):
@@ -306,8 +433,26 @@ async def get_cedula(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Ingrese solo números (sin letras ni símbolos).")
         return
     await state.update_data(cedula=message.text)
+    
+    await message.answer(
+        f"📋 Cédula ingresada: *{message.text}*\n\n"
+        "¿Es correcta?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.confirmar_cedula)
+
+@dp.message(RegistroState.confirmar_cedula, F.text == "1")
+async def confirmar_cedula(message: types.Message, state: FSMContext):
     await message.answer("Ingrese la placa del camión (3 letras y 3 números):")
     await state.set_state(RegistroState.camion)
+
+@dp.message(RegistroState.confirmar_cedula, F.text == "2")
+async def editar_cedula(message: types.Message, state: FSMContext):
+    await message.answer("Ingrese la cédula nuevamente:")
+    await state.set_state(RegistroState.cedula)
 
 @dp.message(RegistroState.camion)
 async def get_camion(message: types.Message, state: FSMContext):
@@ -315,46 +460,100 @@ async def get_camion(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Placa inválida. Ejemplo: HHW926.")
         return
     await state.update_data(camion=message.text.upper())
+    
+    await message.answer(
+        f"🚚 Placa ingresada: *{message.text.upper()}*\n\n"
+        "¿Es correcta?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.confirmar_camion)
+
+@dp.message(RegistroState.confirmar_camion, F.text == "1")
+async def confirmar_camion(message: types.Message, state: FSMContext):
     builder = ReplyKeyboardBuilder()
     builder.button(text="Origen")
     builder.button(text="Destino")
-    builder.adjust(2)  # 2 botones en la misma fila
+    builder.adjust(2)
     await message.answer("Seleccione el tipo de pesaje (Origen o Destino):", reply_markup=builder.as_markup(resize_keyboard=True))
     await state.set_state(RegistroState.tipo)
+
+@dp.message(RegistroState.confirmar_camion, F.text == "2")
+async def editar_camion(message: types.Message, state: FSMContext):
+    await message.answer("Ingrese la placa del camión nuevamente:")
+    await state.set_state(RegistroState.camion)
 
 # ==================== ORIGEN ==================== #
 @dp.message(RegistroState.tipo, F.text.lower() == "origen")
 async def origen_peso(message: types.Message, state: FSMContext):
     await state.update_data(tipo="Origen")
-    await message.answer("Ingrese el peso en kg (use coma para decimales):")
+    await message.answer("Ingrese el peso en kg (use coma para decimales):", reply_markup=types.ReplyKeyboardRemove())
     await state.set_state(RegistroState.peso_origen)
 
 @dp.message(RegistroState.peso_origen)
-async def origen_foto(message: types.Message, state: FSMContext):
+async def origen_confirmar_peso(message: types.Message, state: FSMContext):
     if not validar_peso(message.text):
         await message.answer("⚠️ Ingrese solo números (coma para decimales).")
         return
     await state.update_data(peso=message.text)
-    await message.answer("📸 Envíe una foto del pesaje:")
+    
+    await message.answer(
+        f"⚖️ Peso ingresado: *{message.text} kg*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.confirmar_peso_origen)
+
+@dp.message(RegistroState.confirmar_peso_origen, F.text == "1")
+async def confirmar_peso_origen(message: types.Message, state: FSMContext):
+    await message.answer("Envíe la foto del pesaje:")
     await state.set_state(RegistroState.foto)
+
+@dp.message(RegistroState.confirmar_peso_origen, F.text == "2")
+async def editar_peso_origen(message: types.Message, state: FSMContext):
+    await message.answer("Ingrese el peso nuevamente:")
+    await state.set_state(RegistroState.peso_origen)
 
 # ==================== DESTINO ==================== #
 @dp.message(RegistroState.tipo, F.text.lower() == "destino")
 async def destino_bascula(message: types.Message, state: FSMContext):
     await state.update_data(tipo="Destino", silos=[], total_silos=0)
-    await message.answer("Ingrese el peso de la báscula general (en kg, use coma para decimales):")
+    await message.answer("Ingrese el peso de la báscula general (en kg, use coma para decimales):", reply_markup=types.ReplyKeyboardRemove())
     await state.set_state(RegistroState.peso_bascula_destino)
 
 @dp.message(RegistroState.peso_bascula_destino)
-async def destino_primer_silo(message: types.Message, state: FSMContext):
+async def destino_confirmar_bascula(message: types.Message, state: FSMContext):
     if not validar_peso(message.text):
         await message.answer("⚠️ Ingrese solo números (coma para decimales).")
         return
     
     peso_bascula = float(message.text.replace(",", "."))
     await state.update_data(peso_bascula_general=peso_bascula)
+    
+    await message.answer(
+        f"⚖️ Peso de báscula: *{message.text} kg*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.confirmar_peso_bascula)
+
+@dp.message(RegistroState.confirmar_peso_bascula, F.text == "1")
+async def confirmar_bascula(message: types.Message, state: FSMContext):
     await message.answer("Ingrese el número del primer silo (1 a 4):")
     await state.set_state(RegistroState.silo_num)
+
+@dp.message(RegistroState.confirmar_peso_bascula, F.text == "2")
+async def editar_bascula(message: types.Message, state: FSMContext):
+    await message.answer("Ingrese el peso de la báscula nuevamente:")
+    await state.set_state(RegistroState.peso_bascula_destino)
 
 @dp.message(RegistroState.silo_num)
 async def destino_peso_silo(message: types.Message, state: FSMContext):
@@ -367,13 +566,30 @@ async def destino_peso_silo(message: types.Message, state: FSMContext):
     await state.set_state(RegistroState.silo_peso)
 
 @dp.message(RegistroState.silo_peso)
-async def destino_confirmar_silo(message: types.Message, state: FSMContext):
+async def destino_pedir_confirmacion_silo(message: types.Message, state: FSMContext):
     if not validar_peso(message.text):
         await message.answer("⚠️ Ingrese solo números (coma para decimales).")
         return
     
     data = await state.get_data()
-    peso_silo = float(message.text.replace(",", "."))
+    silo_actual = data.get('silo_actual')
+    await state.update_data(peso_silo_temporal=message.text)
+    
+    await message.answer(
+        f"⚖️ Silo {silo_actual}: *{message.text} kg*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.confirmar_silo_peso)
+
+@dp.message(RegistroState.confirmar_silo_peso, F.text == "1")
+async def destino_confirmar_silo(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    peso_silo_str = data.get('peso_silo_temporal')
+    peso_silo = float(peso_silo_str.replace(",", "."))
     silo_actual = data.get('silo_actual')
     
     # Agregar silo a la lista
@@ -419,6 +635,13 @@ async def destino_confirmar_silo(message: types.Message, state: FSMContext):
         builder.adjust(2)
         await message.answer(mensaje + "¿Desea descargar en otro silo?", reply_markup=builder.as_markup(resize_keyboard=True))
         await state.set_state(RegistroState.silo_num)
+
+@dp.message(RegistroState.confirmar_silo_peso, F.text == "2")
+async def editar_peso_silo(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    silo_actual = data.get('silo_actual')
+    await message.answer(f"Ingrese nuevamente el peso para el Silo {silo_actual}:")
+    await state.set_state(RegistroState.silo_peso)
 
 # Handler para cuando el usuario decide agregar otro silo o terminar
 @dp.message(RegistroState.silo_num, F.text.lower().in_(["sí, agregar otro silo", "si, agregar otro silo", "sí", "si"]))
@@ -716,7 +939,8 @@ async def guardar_registro(message: types.Message, state: FSMContext):
         await message.answer(
             "\n¿Desea hacer algo más?\n\n"
             "1️⃣ Registrar Pesaje\n"
-            "2️⃣ Consultar Capacidad de Silos\n\n"
+            "2️⃣ Consultar Capacidad de Silos\n"
+            "3️⃣ Restar Peso de Silo\n\n"
             "Escriba el número de la opción:"
         )
         await state.set_state(RegistroState.menu_principal)
