@@ -195,6 +195,9 @@ class RegistroState(StatesGroup):
     confirmar_tipo_empleado = State()  # NUEVO: Confirmar tipo de empleado
     camion = State()
     confirmar_camion = State()
+    tipo_carga = State()  # NUEVO: Tipo de carga
+    especificar_otros = State()  # NUEVO: Especificar si selecciona "Otros"
+    confirmar_tipo_carga = State()  # NUEVO: Confirmar tipo de carga
     tipo = State()
     confirmar_tipo = State()
     peso_origen = State()
@@ -526,16 +529,88 @@ async def get_camion(message: types.Message, state: FSMContext):
 @dp.message(RegistroState.confirmar_camion, F.text == "1")
 async def confirmar_camion(message: types.Message, state: FSMContext):
     builder = ReplyKeyboardBuilder()
+    builder.button(text="Cerdo vivo")
+    builder.button(text="Canales frías")
+    builder.button(text="Desposte")
+    builder.button(text="Pedidos")
+    builder.button(text="Gasolina")
+    builder.button(text="Otros")
+    builder.adjust(2)  # 2 botones por fila
+    await message.answer("¿Qué tipo de carga transporta?", reply_markup=builder.as_markup(resize_keyboard=True))
+    await state.set_state(RegistroState.tipo_carga)
+
+@dp.message(RegistroState.confirmar_camion, F.text == "2")
+async def editar_camion(message: types.Message, state: FSMContext):
+    await message.answer("Ingrese la placa del camión nuevamente:")
+    await state.set_state(RegistroState.camion)
+
+# ==================== TIPO DE CARGA ==================== #
+@dp.message(RegistroState.tipo_carga, F.text.in_(["Cerdo vivo", "Canales frías", "Desposte", "Pedidos", "Gasolina"]))
+async def get_tipo_carga(message: types.Message, state: FSMContext):
+    await state.update_data(tipo_carga=message.text)
+    await message.answer(
+        f"📦 Tipo de carga: *{message.text}*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await state.set_state(RegistroState.confirmar_tipo_carga)
+
+@dp.message(RegistroState.tipo_carga, F.text == "Otros")
+async def get_tipo_carga_otros(message: types.Message, state: FSMContext):
+    await message.answer(
+        "Por favor especifique el tipo de carga:",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await state.set_state(RegistroState.especificar_otros)
+
+@dp.message(RegistroState.especificar_otros)
+async def especificar_otros_carga(message: types.Message, state: FSMContext):
+    tipo_especifico = message.text.strip()
+    if not tipo_especifico:
+        await message.answer("⚠️ Por favor ingrese un tipo de carga válido.")
+        return
+
+    tipo_carga_completo = f"Otros - {tipo_especifico}"
+    await state.update_data(tipo_carga=tipo_carga_completo)
+    await message.answer(
+        f"📦 Tipo de carga: *{tipo_carga_completo}*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.confirmar_tipo_carga)
+
+@dp.message(RegistroState.tipo_carga)
+async def tipo_carga_invalido(message: types.Message, state: FSMContext):
+    await message.answer("⚠️ Por favor seleccione una opción válida usando los botones.")
+
+@dp.message(RegistroState.confirmar_tipo_carga, F.text == "1")
+async def confirmar_tipo_carga(message: types.Message, state: FSMContext):
+    builder = ReplyKeyboardBuilder()
     builder.button(text="Origen")
     builder.button(text="Destino")
     builder.adjust(2)
     await message.answer("Seleccione el tipo de pesaje (Origen o Destino):", reply_markup=builder.as_markup(resize_keyboard=True))
     await state.set_state(RegistroState.tipo)
 
-@dp.message(RegistroState.confirmar_camion, F.text == "2")
-async def editar_camion(message: types.Message, state: FSMContext):
-    await message.answer("Ingrese la placa del camión nuevamente:")
-    await state.set_state(RegistroState.camion)
+@dp.message(RegistroState.confirmar_tipo_carga, F.text == "2")
+async def editar_tipo_carga(message: types.Message, state: FSMContext):
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="Cerdo vivo")
+    builder.button(text="Canales frías")
+    builder.button(text="Desposte")
+    builder.button(text="Pedidos")
+    builder.button(text="Gasolina")
+    builder.button(text="Otros")
+    builder.adjust(2)
+    await message.answer("¿Qué tipo de carga transporta?", reply_markup=builder.as_markup(resize_keyboard=True))
+    await state.set_state(RegistroState.tipo_carga)
 
 # ==================== ORIGEN ==================== #
 @dp.message(RegistroState.tipo, F.text.lower() == "origen")
@@ -785,9 +860,9 @@ async def guardar_registro(message: types.Message, state: FSMContext):
                         bascula = data.get("bascula", "Báscula Origen")
 
                         await conn.execute('''
-                            INSERT INTO registros (camion_id, tipo_pesaje, bascula, peso, fecha, cedula, imagen, tipodeempleado)
-                            VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7)
-                        ''', placa, tipo_pesaje, bascula, peso_float, data.get("cedula"), drive_link, data.get("tipo_empleado"))
+                            INSERT INTO registros (camion_id, tipo_pesaje, bascula, peso, fecha, cedula, imagen, tipodeempleado, tipocarga)
+                            VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8)
+                        ''', placa, tipo_pesaje, bascula, peso_float, data.get("cedula"), drive_link, data.get("tipo_empleado"), data.get("tipo_carga"))
                         
                         registro_guardado = True
                         print("✅ Registro de ORIGEN guardado en base de datos")
@@ -811,10 +886,10 @@ async def guardar_registro(message: types.Message, state: FSMContext):
                         
                         # Guardar el registro principal (solo peso de báscula)
                         registro_id = await conn.fetchval('''
-                            INSERT INTO registros (camion_id, tipo_pesaje, bascula, peso, fecha, cedula, imagen, tipodeempleado)
-                            VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7)
+                            INSERT INTO registros (camion_id, tipo_pesaje, bascula, peso, fecha, cedula, imagen, tipodeempleado, tipocarga)
+                            VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8)
                             RETURNING id
-                        ''', placa, tipo_pesaje, "Báscula General", peso_bascula, data.get("cedula"), drive_link, data.get("tipo_empleado"))
+                        ''', placa, tipo_pesaje, "Báscula General", peso_bascula, data.get("cedula"), drive_link, data.get("tipo_empleado"), data.get("tipo_carga"))
                         
                         print(f"✅ Registro de DESTINO guardado en base de datos (ID: {registro_id})")
                         print(f"   - Peso báscula: {peso_bascula} kg")
@@ -872,6 +947,7 @@ async def guardar_registro(message: types.Message, state: FSMContext):
                 f"👤 Cédula: {data.get('cedula')}\n"
                 f"👷 Tipo: {data.get('tipo_empleado')}\n"
                 f"🚚 Placa: {data.get('camion')}\n"
+                f"📦 Carga: {data.get('tipo_carga')}\n"
                 f"⚖️ Pesaje: {tipo_pesaje}\n"
                 f"🏋️ Peso: {peso_str} kg\n"
                 f"🕒 Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
@@ -890,6 +966,7 @@ async def guardar_registro(message: types.Message, state: FSMContext):
                 f"👤 Cédula: {data.get('cedula')}\n"
                 f"👷 Tipo: {data.get('tipo_empleado')}\n"
                 f"🚚 Placa: {data.get('camion')}\n"
+                f"📦 Carga: {data.get('tipo_carga')}\n"
                 f"⚖️ Pesaje: {tipo_pesaje}\n"
                 f"━━━━━━━━━━━━━━━\n"
                 f"📍 Peso Báscula: {peso_bascula} kg\n"
@@ -927,6 +1004,7 @@ async def guardar_registro(message: types.Message, state: FSMContext):
                         f"👤 *Cédula:* `{data.get('cedula')}`\n"
                         f"👷 *Tipo:* {data.get('tipo_empleado')}\n"
                         f"🚚 *Placa:* `{data.get('camion')}`\n"
+                        f"📦 *Carga:* {data.get('tipo_carga')}\n"
                         f"⚖️ *Pesaje:* {tipo_pesaje}\n"
                         f"🏋️ *Peso:* {peso_str} kg\n"
                         f"🕒 *Fecha:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
@@ -947,6 +1025,7 @@ async def guardar_registro(message: types.Message, state: FSMContext):
                         f"👤 *Cédula:* `{data.get('cedula')}`\n"
                         f"👷 *Tipo:* {data.get('tipo_empleado')}\n"
                         f"🚚 *Placa:* `{data.get('camion')}`\n"
+                        f"📦 *Carga:* {data.get('tipo_carga')}\n"
                         f"⚖️ *Pesaje:* {tipo_pesaje}\n"
                         f"━━━━━━━━━━━━━━━━━━━━\n"
                         f"📍 *Peso Báscula:* {peso_bascula} kg\n"
