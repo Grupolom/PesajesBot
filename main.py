@@ -191,6 +191,8 @@ class RegistroState(StatesGroup):
     menu_principal = State()  # Menú inicial
     cedula = State()
     confirmar_cedula = State()
+    tipo_empleado = State()  # NUEVO: Tipo de empleado
+    confirmar_tipo_empleado = State()  # NUEVO: Confirmar tipo de empleado
     camion = State()
     confirmar_camion = State()
     tipo = State()
@@ -446,13 +448,63 @@ async def get_cedula(message: types.Message, state: FSMContext):
 
 @dp.message(RegistroState.confirmar_cedula, F.text == "1")
 async def confirmar_cedula(message: types.Message, state: FSMContext):
-    await message.answer("Ingrese la placa del camión (3 letras y 3 números):")
-    await state.set_state(RegistroState.camion)
+    await message.answer(
+        "¿Es usted transportador o trabajador?\n\n"
+        "1️⃣ Transportador\n"
+        "2️⃣ Trabajador\n\n"
+        "Escriba el número de la opción:"
+    )
+    await state.set_state(RegistroState.tipo_empleado)
 
 @dp.message(RegistroState.confirmar_cedula, F.text == "2")
 async def editar_cedula(message: types.Message, state: FSMContext):
     await message.answer("Ingrese la cédula nuevamente:")
     await state.set_state(RegistroState.cedula)
+
+@dp.message(RegistroState.tipo_empleado, F.text == "1")
+async def get_tipo_transportador(message: types.Message, state: FSMContext):
+    await state.update_data(tipo_empleado="Transportador")
+    await message.answer(
+        "👷 Tipo seleccionado: *Transportador*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.confirmar_tipo_empleado)
+
+@dp.message(RegistroState.tipo_empleado, F.text == "2")
+async def get_tipo_trabajador(message: types.Message, state: FSMContext):
+    await state.update_data(tipo_empleado="Trabajador")
+    await message.answer(
+        "👷 Tipo seleccionado: *Trabajador*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.confirmar_tipo_empleado)
+
+@dp.message(RegistroState.tipo_empleado)
+async def tipo_empleado_invalido(message: types.Message, state: FSMContext):
+    await message.answer("⚠️ Por favor escriba 1 para Transportador o 2 para Trabajador.")
+
+@dp.message(RegistroState.confirmar_tipo_empleado, F.text == "1")
+async def confirmar_tipo_empleado(message: types.Message, state: FSMContext):
+    await message.answer("Ingrese la placa del camión (3 letras y 3 números):")
+    await state.set_state(RegistroState.camion)
+
+@dp.message(RegistroState.confirmar_tipo_empleado, F.text == "2")
+async def editar_tipo_empleado(message: types.Message, state: FSMContext):
+    await message.answer(
+        "¿Es usted transportador o trabajador?\n\n"
+        "1️⃣ Transportador\n"
+        "2️⃣ Trabajador\n\n"
+        "Escriba el número de la opción:"
+    )
+    await state.set_state(RegistroState.tipo_empleado)
 
 @dp.message(RegistroState.camion)
 async def get_camion(message: types.Message, state: FSMContext):
@@ -731,11 +783,11 @@ async def guardar_registro(message: types.Message, state: FSMContext):
                         peso_str = str(data.get("peso", "0"))
                         peso_float = float(peso_str.replace(",", "."))
                         bascula = data.get("bascula", "Báscula Origen")
-                        
+
                         await conn.execute('''
-                            INSERT INTO registros (camion_id, tipo_pesaje, bascula, peso, fecha, cedula, imagen)
-                            VALUES ($1, $2, $3, $4, NOW(), $5, $6)
-                        ''', placa, tipo_pesaje, bascula, peso_float, data.get("cedula"), drive_link)
+                            INSERT INTO registros (camion_id, tipo_pesaje, bascula, peso, fecha, cedula, imagen, tipodeempleado)
+                            VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7)
+                        ''', placa, tipo_pesaje, bascula, peso_float, data.get("cedula"), drive_link, data.get("tipo_empleado"))
                         
                         registro_guardado = True
                         print("✅ Registro de ORIGEN guardado en base de datos")
@@ -759,10 +811,10 @@ async def guardar_registro(message: types.Message, state: FSMContext):
                         
                         # Guardar el registro principal (solo peso de báscula)
                         registro_id = await conn.fetchval('''
-                            INSERT INTO registros (camion_id, tipo_pesaje, bascula, peso, fecha, cedula, imagen)
-                            VALUES ($1, $2, $3, $4, NOW(), $5, $6)
+                            INSERT INTO registros (camion_id, tipo_pesaje, bascula, peso, fecha, cedula, imagen, tipodeempleado)
+                            VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7)
                             RETURNING id
-                        ''', placa, tipo_pesaje, "Báscula General", peso_bascula, data.get("cedula"), drive_link)
+                        ''', placa, tipo_pesaje, "Báscula General", peso_bascula, data.get("cedula"), drive_link, data.get("tipo_empleado"))
                         
                         print(f"✅ Registro de DESTINO guardado en base de datos (ID: {registro_id})")
                         print(f"   - Peso báscula: {peso_bascula} kg")
@@ -818,8 +870,9 @@ async def guardar_registro(message: types.Message, state: FSMContext):
             resumen = (
                 f"✅ Registro completado\n"
                 f"👤 Cédula: {data.get('cedula')}\n"
+                f"👷 Tipo: {data.get('tipo_empleado')}\n"
                 f"🚚 Placa: {data.get('camion')}\n"
-                f"⚖️ Tipo: {tipo_pesaje}\n"
+                f"⚖️ Pesaje: {tipo_pesaje}\n"
                 f"🏋️ Peso: {peso_str} kg\n"
                 f"🕒 Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
             )
@@ -829,14 +882,15 @@ async def guardar_registro(message: types.Message, state: FSMContext):
             total_silos = data.get('total_silos', 0)
             peso_origen_comp = data.get('peso_origen_comparacion')
             diferencia_origen = data.get('diferencia_origen')
-            
+
             detalle_silos = "\n".join([f"  • Silo {s['numero']}: {s['peso']} kg" for s in silos])
-            
+
             resumen = (
                 f"✅ Registro completado\n"
                 f"👤 Cédula: {data.get('cedula')}\n"
+                f"👷 Tipo: {data.get('tipo_empleado')}\n"
                 f"🚚 Placa: {data.get('camion')}\n"
-                f"⚖️ Tipo: {tipo_pesaje}\n"
+                f"⚖️ Pesaje: {tipo_pesaje}\n"
                 f"━━━━━━━━━━━━━━━\n"
                 f"📍 Peso Báscula: {peso_bascula} kg\n"
                 f"📦 Silos:\n{detalle_silos}\n"
@@ -871,8 +925,9 @@ async def guardar_registro(message: types.Message, state: FSMContext):
                         f"🚨 *NUEVO REGISTRO DE PESAJE*\n"
                         f"━━━━━━━━━━━━━━━━━━━━\n"
                         f"👤 *Cédula:* `{data.get('cedula')}`\n"
+                        f"👷 *Tipo:* {data.get('tipo_empleado')}\n"
                         f"🚚 *Placa:* `{data.get('camion')}`\n"
-                        f"⚖️ *Tipo:* {tipo_pesaje}\n"
+                        f"⚖️ *Pesaje:* {tipo_pesaje}\n"
                         f"🏋️ *Peso:* {peso_str} kg\n"
                         f"🕒 *Fecha:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
                         f"━━━━━━━━━━━━━━━━━━━━"
@@ -883,15 +938,16 @@ async def guardar_registro(message: types.Message, state: FSMContext):
                     total_silos = data.get('total_silos', 0)
                     peso_origen_comp = data.get('peso_origen_comparacion')
                     diferencia_origen = data.get('diferencia_origen')
-                    
+
                     detalle_silos = "\n".join([f"  • Silo {s['numero']}: {s['peso']} kg" for s in silos])
-                    
+
                     mensaje_grupo = (
                         f"🚨 *NUEVO REGISTRO DE PESAJE*\n"
                         f"━━━━━━━━━━━━━━━━━━━━\n"
                         f"👤 *Cédula:* `{data.get('cedula')}`\n"
+                        f"👷 *Tipo:* {data.get('tipo_empleado')}\n"
                         f"🚚 *Placa:* `{data.get('camion')}`\n"
-                        f"⚖️ *Tipo:* {tipo_pesaje}\n"
+                        f"⚖️ *Pesaje:* {tipo_pesaje}\n"
                         f"━━━━━━━━━━━━━━━━━━━━\n"
                         f"📍 *Peso Báscula:* {peso_bascula} kg\n"
                         f"📦 *Descarga por Silos:*\n{detalle_silos}\n"
