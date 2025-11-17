@@ -232,6 +232,16 @@ class RegistroState(StatesGroup):
     sitio3_confirmar_tipo_comida = State()
     sitio3_agregar_mas = State()
 
+    # Estados para Descarga de Animales
+    descarga_cedula = State()
+    descarga_confirmar_cedula = State()
+    descarga_cantidad_lechones = State()
+    descarga_confirmar_cantidad = State()
+    descarga_rango_corrales = State()
+    descarga_confirmar_rango = State()
+    descarga_numero_lote = State()
+    descarga_confirmar_lote = State()
+
 # ==================== ESTADOS PARA MENU CONDUCTORES ==================== #
 class ConductoresState(StatesGroup):
     """Estados separados para el menú de conductores"""
@@ -295,6 +305,41 @@ def validar_rango_corrales(valor: str) -> tuple[bool, str]:
         return True, ""
     except ValueError:
         return False, "Error al procesar los números"
+
+# ==================== VALIDACIONES DESCARGA DE ANIMALES ==================== #
+def validar_cantidad_lechones(valor: str) -> tuple[bool, int, str]:
+    """
+    Valida cantidad de lechones: entero positivo, 1-5000
+    Retorna: (es_valido, cantidad, mensaje_error)
+    """
+    try:
+        cantidad = int(valor)
+        if cantidad < 1:
+            return False, 0, "La cantidad debe ser al menos 1 lechón"
+        if cantidad > 5000:
+            return False, 0, "La cantidad no puede superar 5000 lechones (límite de capacidad)"
+        return True, cantidad, ""
+    except ValueError:
+        return False, 0, "Debe ingresar un número entero válido"
+
+def validar_numero_lote(valor: str) -> tuple[bool, str]:
+    """
+    Valida número de lote: alfanumérico, 3-30 caracteres
+    Permite: letras, números, guiones, guiones bajos
+    Retorna: (es_valido, mensaje_error)
+    """
+    # Validar formato con regex
+    if not re.match(r'^[A-Za-z0-9_-]{3,30}$', valor):
+        if len(valor) < 3:
+            return False, "El número de lote es muy corto (mínimo 3 caracteres)"
+        elif len(valor) > 30:
+            return False, "El número de lote es muy largo (máximo 30 caracteres)"
+        elif ' ' in valor:
+            return False, "El número de lote no puede contener espacios"
+        else:
+            return False, "El número de lote solo puede contener letras, números, guiones (-) y guiones bajos (_)"
+
+    return True, ""
 
 async def volver_menu_principal(message: types.Message, state: FSMContext):
     """Función helper para volver al menú principal multi-perfil"""
@@ -431,13 +476,9 @@ async def sitio3_medicion_silos(message: types.Message, state: FSMContext):
 
 @dp.message(RegistroState.sitio3_menu, F.text == "3")
 async def sitio3_descarga_animales(message: types.Message, state: FSMContext):
-    """Sitio 3 - Opción 3: Descarga de Animales (Placeholder)"""
-    await message.answer(
-        "🚧 *DESCARGA DE ANIMALES*\n\n"
-        "Esta funcionalidad estará disponible próximamente.\n\n",
-        parse_mode="Markdown"
-    )
-    await volver_menu_sitio3(message, state)
+    """Sitio 3 - Opción 3: Descarga de Animales"""
+    await message.answer("¿Cuál es su cédula?")
+    await state.set_state(RegistroState.descarga_cedula)
 
 # ==================== OPERARIO SITIO 3 - REGISTRO DE ANIMALES ==================== #
 
@@ -594,7 +635,7 @@ async def sitio3_confirmar_rango_si(message: types.Message, state: FSMContext):
     """Confirma rango y pasa a tipo de comida"""
     builder = ReplyKeyboardBuilder()
     builder.button(text="Levante")
-    builder.button(text="Engorde")
+    builder.button(text="Engorde Medicado")
     builder.button(text="Finalizador")
     builder.adjust(2)  # 2 botones por fila
 
@@ -743,12 +784,13 @@ async def sitio3_terminar_registro(message: types.Message, state: FSMContext):
             fecha_registro = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # Insertar cada corral como una fila separada
+            telegram_user_id = message.from_user.id
             for corral in corrales:
                 await conn.execute('''
                     INSERT INTO operario_sitio3_animales
-                    (cedula_operario, cantidad_animales, rango_corrales, tipo_comida, fecha_registro, session_id)
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                ''', cedula, corral['cantidad'], corral['rango'], corral['tipo_comida'], fecha_registro, session_id)
+                    (cedula_operario, cantidad_animales, rango_corrales, tipo_comida, fecha_registro, session_id, telegram_user_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ''', cedula, corral['cantidad'], corral['rango'], corral['tipo_comida'], fecha_registro, session_id, telegram_user_id)
 
             print(f"✅ {len(corrales)} corrales guardados en BD (session: {session_id})")
         else:
@@ -817,6 +859,330 @@ async def sitio3_terminar_registro(message: types.Message, state: FSMContext):
 async def sitio3_agregar_mas_invalido(message: types.Message, state: FSMContext):
     """Handler para respuestas inválidas"""
     await message.answer("⚠️ Por favor seleccione una opción válida usando los botones.")
+
+# ==================== OPERARIO SITIO 3 - DESCARGA DE ANIMALES ==================== #
+
+# PASO 1: Cédula
+@dp.message(RegistroState.descarga_cedula)
+async def descarga_get_cedula(message: types.Message, state: FSMContext):
+    """Captura y valida la cédula del operario"""
+    cedula = message.text.strip()
+
+    if not validar_cedula_sitio3(cedula):
+        await message.answer(
+            "⚠️ Cédula inválida.\n\n"
+            "Debe contener solo números y tener entre 6 y 12 dígitos.\n\n"
+            "Por favor, intente nuevamente:"
+        )
+        return
+
+    await state.update_data(descarga_cedula=cedula)
+    await message.answer(
+        f"📋 Cédula ingresada: *{cedula}*\n\n"
+        "¿Es correcta?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.descarga_confirmar_cedula)
+
+@dp.message(RegistroState.descarga_confirmar_cedula, F.text == "1")
+async def descarga_confirmar_cedula_si(message: types.Message, state: FSMContext):
+    """Confirma cédula y pasa a cantidad de lechones"""
+    await message.answer(
+        "🐷 Ingrese la cantidad de lechones\n\n"
+        "⚠️ Nota: Los lechones son cerdos jóvenes que\n"
+        "están llegando a la granja.\n\n"
+        "Cantidad:"
+    )
+    await state.set_state(RegistroState.descarga_cantidad_lechones)
+
+@dp.message(RegistroState.descarga_confirmar_cedula, F.text == "2")
+async def descarga_confirmar_cedula_no(message: types.Message, state: FSMContext):
+    """Rechaza cédula y vuelve a preguntar"""
+    await message.answer("¿Cuál es su cédula?")
+    await state.set_state(RegistroState.descarga_cedula)
+
+@dp.message(RegistroState.descarga_confirmar_cedula)
+async def descarga_confirmar_cedula_invalido(message: types.Message, state: FSMContext):
+    """Handler para respuestas inválidas en confirmación de cédula"""
+    await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
+
+# PASO 2: Cantidad de Lechones
+@dp.message(RegistroState.descarga_cantidad_lechones)
+async def descarga_get_cantidad(message: types.Message, state: FSMContext):
+    """Captura y valida cantidad de lechones"""
+    cantidad_texto = message.text.strip()
+
+    es_valido, cantidad, mensaje_error = validar_cantidad_lechones(cantidad_texto)
+
+    if not es_valido:
+        await message.answer(f"⚠️ {mensaje_error}\n\nPor favor, intente nuevamente:")
+        return
+
+    # Guardar cantidad temporalmente
+    await state.update_data(descarga_cantidad=cantidad)
+
+    # Si es > 1000, mostrar advertencia especial
+    if cantidad > 1000:
+        await message.answer(
+            "⚠️ *ADVERTENCIA - CANTIDAD ALTA*\n\n"
+            f"Está registrando más de 1000 lechones en una sola descarga.\n\n"
+            f"Cantidad ingresada: *{cantidad} lechones*\n\n"
+            "¿Está seguro de que es correcta?\n\n"
+            "1️⃣ Sí, es correcto\n"
+            "2️⃣ No, corregir cantidad\n\n"
+            "Escriba el número de la opción:",
+            parse_mode="Markdown"
+        )
+    else:
+        # Confirmación normal
+        await message.answer(
+            f"🐷 Lechones a descargar: *{cantidad}*\n\n"
+            "¿Es correcto?\n\n"
+            "1️⃣ Sí, confirmar\n"
+            "2️⃣ No, editar\n\n"
+            "Escriba el número de la opción:",
+            parse_mode="Markdown"
+        )
+
+    await state.set_state(RegistroState.descarga_confirmar_cantidad)
+
+@dp.message(RegistroState.descarga_confirmar_cantidad, F.text == "1")
+async def descarga_confirmar_cantidad_si(message: types.Message, state: FSMContext):
+    """Confirma cantidad y pasa a rango de corrales"""
+    await message.answer(
+        "📍 Ingrese el rango de corrales\n\n"
+        "Formato requerido: *#-#*\n\n"
+        "*Ejemplos válidos:*\n"
+        "• `1-5` (corrales del 1 al 5)\n"
+        "• `10-15` (corrales del 10 al 15)\n"
+        "• `20-25` (corrales del 20 al 25)\n\n"
+        "Por favor ingrese el rango:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.descarga_rango_corrales)
+
+@dp.message(RegistroState.descarga_confirmar_cantidad, F.text == "2")
+async def descarga_confirmar_cantidad_no(message: types.Message, state: FSMContext):
+    """Rechaza cantidad y vuelve a preguntar"""
+    await message.answer(
+        "🐷 Ingrese la cantidad de lechones\n\n"
+        "⚠️ Nota: Los lechones son cerdos jóvenes que\n"
+        "están llegando a la granja.\n\n"
+        "Cantidad:"
+    )
+    await state.set_state(RegistroState.descarga_cantidad_lechones)
+
+@dp.message(RegistroState.descarga_confirmar_cantidad)
+async def descarga_confirmar_cantidad_invalido(message: types.Message, state: FSMContext):
+    """Handler para respuestas inválidas"""
+    await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
+
+# PASO 3: Rango de Corrales
+@dp.message(RegistroState.descarga_rango_corrales)
+async def descarga_get_rango(message: types.Message, state: FSMContext):
+    """Captura y valida rango de corrales"""
+    rango = message.text.strip()
+
+    es_valido, mensaje_error = validar_rango_corrales(rango)
+
+    if not es_valido:
+        await message.answer(
+            f"⚠️ {mensaje_error}\n\n"
+            "Por favor ingrese el rango en formato: *#-#*\n\n"
+            "*Ejemplos:*\n"
+            "• `1-5`\n"
+            "• `10-15`\n"
+            "• `20-25`",
+            parse_mode="Markdown"
+        )
+        return
+
+    await state.update_data(descarga_rango=rango)
+    await message.answer(
+        f"📍 Corrales de descarga: *{rango}*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.descarga_confirmar_rango)
+
+@dp.message(RegistroState.descarga_confirmar_rango, F.text == "1")
+async def descarga_confirmar_rango_si(message: types.Message, state: FSMContext):
+    """Confirma rango y pasa a número de lote"""
+    await message.answer(
+        "🏷️ Ingrese el número de LOTE\n\n"
+        "⚠️ Nota: El lote es el identificador único\n"
+        "de este grupo de animales para trazabilidad.\n\n"
+        "Formato típico: YYYY-NNN\n"
+        "Ejemplos: 2024-001, 2024-045, 2025-123\n\n"
+        "Número de lote:"
+    )
+    await state.set_state(RegistroState.descarga_numero_lote)
+
+@dp.message(RegistroState.descarga_confirmar_rango, F.text == "2")
+async def descarga_confirmar_rango_no(message: types.Message, state: FSMContext):
+    """Rechaza rango y vuelve a preguntar"""
+    await message.answer(
+        "📍 Ingrese el rango de corrales\n\n"
+        "Formato requerido: *#-#*\n\n"
+        "*Ejemplos válidos:*\n"
+        "• `1-5` (corrales del 1 al 5)\n"
+        "• `10-15` (corrales del 10 al 15)\n"
+        "• `20-25` (corrales del 20 al 25)\n\n"
+        "Por favor ingrese el rango:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.descarga_rango_corrales)
+
+@dp.message(RegistroState.descarga_confirmar_rango)
+async def descarga_confirmar_rango_invalido(message: types.Message, state: FSMContext):
+    """Handler para respuestas inválidas"""
+    await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
+
+# PASO 4: Número de Lote
+@dp.message(RegistroState.descarga_numero_lote)
+async def descarga_get_lote(message: types.Message, state: FSMContext):
+    """Captura y valida número de lote"""
+    numero_lote = message.text.strip()
+
+    es_valido, mensaje_error = validar_numero_lote(numero_lote)
+
+    if not es_valido:
+        await message.answer(
+            f"⚠️ {mensaje_error}\n\n"
+            "*Formato válido:*\n"
+            "• Solo letras, números, guiones (-) y guiones bajos (_)\n"
+            "• Entre 3 y 30 caracteres\n"
+            "• Sin espacios\n\n"
+            "*Ejemplos válidos:*\n"
+            "• `2024-001`\n"
+            "• `2025-123`\n"
+            "• `LOTE_456`\n\n"
+            "Por favor, intente nuevamente:",
+            parse_mode="Markdown"
+        )
+        return
+
+    await state.update_data(descarga_lote=numero_lote)
+    await message.answer(
+        f"🏷️ Lote: *{numero_lote}*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.descarga_confirmar_lote)
+
+@dp.message(RegistroState.descarga_confirmar_lote, F.text == "1")
+async def descarga_confirmar_lote_si(message: types.Message, state: FSMContext):
+    """Confirma lote y procede a guardar"""
+    await message.answer("⏳ Guardando registro de descarga...")
+
+    data = await state.get_data()
+    cedula = data.get('descarga_cedula')
+    cantidad = data.get('descarga_cantidad')
+    rango_corrales = data.get('descarga_rango')
+    numero_lote = data.get('descarga_lote')
+
+    # Generar identificador LOTE+CORRAL
+    identificador = f"{numero_lote}+{rango_corrales}"
+
+    # Guardar en base de datos
+    conn = None
+    try:
+        conn = await get_db_connection()
+        if conn:
+            fecha_registro = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            telegram_user_id = message.from_user.id
+
+            # Insertar registro
+            await conn.execute('''
+                INSERT INTO operario_sitio3_descarga_animales
+                (cedula_operario, cantidad_lechones, rango_corrales, numero_lote, identificador, fecha_registro, telegram_user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ''', cedula, cantidad, rango_corrales, numero_lote, identificador, fecha_registro, telegram_user_id)
+
+            print(f"✅ Descarga guardada en BD: {identificador}")
+        else:
+            print("⚠️ No se pudo obtener conexión a la base de datos")
+
+    except Exception as e:
+        print(f"❌ Error guardando en base de datos: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        if conn:
+            await release_db_connection(conn)
+
+    # Generar notificación para el grupo de Telegram
+    if GROUP_CHAT_ID:
+        try:
+            fecha_formateada = datetime.now().strftime('%d/%m/%Y %H:%M')
+
+            mensaje_grupo = (
+                "🚚 *NUEVA DESCARGA DE LECHONES - SITIO 3*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"👤 Operario: `{cedula}`\n"
+                f"🕒 Fecha: {fecha_formateada}\n\n"
+                "📦 *INFORMACIÓN DE DESCARGA:*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"🏷️ Identificador: *{identificador}*\n"
+                f"📍 Corrales: {rango_corrales}\n"
+                f"🐷 Cantidad: {cantidad} lechones\n"
+                f"🏷️ Lote: {numero_lote}\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "✅ Descarga registrada exitosamente"
+            )
+
+            await bot.send_message(GROUP_CHAT_ID, mensaje_grupo, parse_mode="Markdown")
+            print("✅ Notificación enviada al grupo")
+
+        except Exception as e:
+            print(f"⚠️ Error al enviar notificación al grupo: {e}")
+
+    # Mostrar resumen al usuario
+    resumen_usuario = (
+        "✅ *Descarga registrada exitosamente*\n\n"
+        "📊 *Resumen:*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏷️ Lote: {numero_lote}\n"
+        f"📍 Corrales: {rango_corrales}\n"
+        f"🐷 Lechones: {cantidad}\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Los datos se han guardado correctamente."
+    )
+
+    await message.answer(resumen_usuario, parse_mode="Markdown")
+
+    # Volver al menú principal
+    await asyncio.sleep(1)
+    await volver_menu_principal(message, state)
+
+@dp.message(RegistroState.descarga_confirmar_lote, F.text == "2")
+async def descarga_confirmar_lote_no(message: types.Message, state: FSMContext):
+    """Rechaza lote y vuelve a preguntar"""
+    await message.answer(
+        "🏷️ Ingrese el número de LOTE\n\n"
+        "⚠️ Nota: El lote es el identificador único\n"
+        "de este grupo de animales para trazabilidad.\n\n"
+        "Formato típico: YYYY-NNN\n"
+        "Ejemplos: 2024-001, 2024-045, 2025-123\n\n"
+        "Número de lote:"
+    )
+    await state.set_state(RegistroState.descarga_numero_lote)
+
+@dp.message(RegistroState.descarga_confirmar_lote)
+async def descarga_confirmar_lote_invalido(message: types.Message, state: FSMContext):
+    """Handler para respuestas inválidas"""
+    await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
+
+# ==================== FIN DESCARGA DE ANIMALES ==================== #
 
 # ==================== FIN OPERARIO SITIO 3 ==================== #
 
