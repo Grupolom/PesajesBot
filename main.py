@@ -363,7 +363,7 @@ async def volver_menu_sitio3(message: types.Message, state: FSMContext):
         "Seleccione una opción:\n\n"
         "1️⃣ Registro de Animales\n"
         "2️⃣ Medición de Silos _(Próximamente)_\n"
-        "3️⃣ Descarga de Animales _(Próximamente)_\n\n"
+        "3️⃣ Descarga de Animales \n\n"
         "Escriba el número de la opción:\n\n"
         "💡 _Escriba 0 para volver al menú principal_",
         parse_mode="Markdown"
