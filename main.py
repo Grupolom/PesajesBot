@@ -249,29 +249,52 @@ class ConductoresState(StatesGroup):
     
     # Flujo de registro de pesaje conductores
     cedula = State()
+    confirmar_cedula = State()
+    
     placa = State()
-    tipo_transporte = State()  # Lechones, concentrado, cerdos gordos, combustible
+    confirmar_placa = State()
+    
+    tipo_transporte = State()
+    confirmar_tipo_transporte = State()
     
     # Estados específicos para cada tipo de carga
-    num_animales = State()  # Para lechones o cerdos gordos
-    tipo_combustible = State()  # Para combustible: Diesel o Corriente
-    cantidad_galones = State()  # Para combustible
-    factura_dato1 = State()  # Para concentrado: primer dato de factura
-    factura_dato2 = State()  # Para concentrado: segundo dato
-    factura_dato3 = State()  # Para concentrado: tercer dato
-    factura_foto = State()  # Para concentrado: foto de factura
+    num_animales = State()
+    confirmar_num_animales = State()
+    
+    tipo_combustible = State()
+    confirmar_tipo_combustible = State()
+    
+    cantidad_galones = State()
+    confirmar_cantidad_galones = State()
+    
+    factura_dato1 = State()
+    confirmar_factura_dato1 = State()
+    
+    factura_dato2 = State()
+    confirmar_factura_dato2 = State()
+    
+    factura_dato3 = State()
+    confirmar_factura_dato3 = State()
+    
+    factura_foto = State()
     
     # Selección de báscula
     bascula = State()
+    confirmar_bascula = State()
     
     # Registro de peso
     peso = State()
+    confirmar_peso_input = State()
+    
     foto_pesaje = State()
     confirmar_peso = State()
     
     # Flujo especial para báscula Bogotá (solo cerdos gordos)
     cerdos_vivos = State()
+    confirmar_cerdos_vivos = State()
+    
     cerdos_muertos = State()
+    confirmar_cerdos_muertos = State()
 
 # ==================== VALIDACIONES ==================== #
 def validar_cedula(valor):
@@ -486,6 +509,8 @@ async def menu_operario_sitio1(message: types.Message, state: FSMContext):
 async def menu_conductores(message: types.Message, state: FSMContext):
     """Opción 3: Conductores - Nuevo flujo de pesajes"""
     await state.clear()
+    # Guardar telegram_id automáticamente
+    await state.update_data(telegram_id=message.from_user.id)
     await message.answer(
         "🚛 *CONDUCTORES - REGISTRO DE PESAJE*\n\n"
         "Por favor, ingrese su *cédula*:",
@@ -494,6 +519,23 @@ async def menu_conductores(message: types.Message, state: FSMContext):
     await state.set_state(ConductoresState.cedula)
 
 # ==================== NUEVO FLUJO CONDUCTORES ==================== #
+
+# Función helper para confirmaciones
+async def preguntar_confirmacion(message: types.Message, valor: str, campo: str):
+    """Pregunta si el valor ingresado es correcto"""
+    keyboard = ReplyKeyboardBuilder()
+    keyboard.button(text="1. Confirmar")
+    keyboard.button(text="2. Modificar")
+    keyboard.adjust(2)
+    
+    await message.answer(
+        f"Usted ingresó: *{valor}*\n\n"
+        f"¿Está seguro que está correctamente escrito?\n\n"
+        f"1️⃣ Confirmar\n"
+        f"2️⃣ Modificar",
+        reply_markup=keyboard.as_markup(resize_keyboard=True),
+        parse_mode="Markdown"
+    )
 
 # 1. CÉDULA
 @dp.message(ConductoresState.cedula)
@@ -505,14 +547,39 @@ async def procesar_cedula_conductor(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Cédula inválida. Debe contener solo números.\n\nIntente nuevamente:")
         return
     
-    await state.update_data(cedula=cedula)
-    await message.answer(
-        f"✅ Cédula: *{cedula}*\n\n"
-        f"Ahora, ingrese la *placa del camión*:\n"
-        f"_(Formato: 3 letras + 3 números, ejemplo: NHU982)_",
-        parse_mode="Markdown"
-    )
-    await state.set_state(ConductoresState.placa)
+    await state.update_data(cedula_temp=cedula)
+    await preguntar_confirmacion(message, cedula, "cédula")
+    await state.set_state(ConductoresState.confirmar_cedula)
+
+@dp.message(ConductoresState.confirmar_cedula)
+async def confirmar_cedula_conductor(message: types.Message, state: FSMContext):
+    """Confirma la cédula o permite modificarla"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        await message.answer(
+            "Por favor, ingrese nuevamente su *cédula*:",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.cedula)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        cedula = data.get("cedula_temp")
+        await state.update_data(cedula=cedula)
+        
+        await message.answer(
+            f"✅ Cédula: *{cedula}*\n\n"
+            f"Ahora, ingrese la *placa del camión*:\n"
+            f"_(Formato: 3 letras + 3 números, ejemplo: NHU982)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.placa)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
 # 2. PLACA
 @dp.message(ConductoresState.placa)
@@ -528,24 +595,48 @@ async def procesar_placa_conductor(message: types.Message, state: FSMContext):
         )
         return
     
-    await state.update_data(placa=placa)
+    await state.update_data(placa_temp=placa)
+    await preguntar_confirmacion(message, placa, "placa")
+    await state.set_state(ConductoresState.confirmar_placa)
+
+@dp.message(ConductoresState.confirmar_placa)
+async def confirmar_placa_conductor(message: types.Message, state: FSMContext):
+    """Confirma la placa o permite modificarla"""
+    texto = message.text.strip().lower()
     
-    # Crear teclado con opciones
-    keyboard = ReplyKeyboardBuilder()
-    keyboard.button(text="1. Lechones")
-    keyboard.button(text="2. Concentrado")
-    keyboard.button(text="3. Cerdos Gordos")
-    keyboard.button(text="4. Combustible")
-    keyboard.adjust(2, 2)  # 2 botones por fila
+    if "2" in texto or "modificar" in texto:
+        await message.answer(
+            "Por favor, ingrese nuevamente la *placa del camión*:\n"
+            "_(Formato: 3 letras + 3 números, ejemplo: NHU982)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.placa)
+        return
     
-    await message.answer(
-        f"✅ Placa: *{placa}*\n\n"
-        f"¿Qué va a transportar?\n\n"
-        f"Seleccione una opción:",
-        reply_markup=keyboard.as_markup(resize_keyboard=True),
-        parse_mode="Markdown"
-    )
-    await state.set_state(ConductoresState.tipo_transporte)
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        placa = data.get("placa_temp")
+        await state.update_data(placa=placa)
+        
+        # Crear teclado con opciones
+        keyboard = ReplyKeyboardBuilder()
+        keyboard.button(text="1. Lechones (cerdos pequeños)")
+        keyboard.button(text="2. Concentrado (alimento)")
+        keyboard.button(text="3. Cerdos Gordos (para venta)")
+        keyboard.button(text="4. Combustible (diesel/corriente)")
+        keyboard.adjust(1)  # 1 botón por fila para que se vean bien
+        
+        await message.answer(
+            f"✅ Placa: *{placa}*\n\n"
+            f"¿Qué va a transportar?\n\n"
+            f"Seleccione una opción:",
+            reply_markup=keyboard.as_markup(resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.tipo_transporte)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
 # 3. TIPO DE TRANSPORTE
 @dp.message(ConductoresState.tipo_transporte)
@@ -1013,6 +1104,7 @@ async def guardar_registro_conductor(message: types.Message, state: FSMContext, 
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS conductores (
                     id SERIAL PRIMARY KEY,
+                    telegram_id BIGINT NOT NULL,
                     cedula VARCHAR(20) NOT NULL,
                     placa VARCHAR(10) NOT NULL,
                     tipo_carga VARCHAR(50) NOT NULL,
@@ -1035,11 +1127,12 @@ async def guardar_registro_conductor(message: types.Message, state: FSMContext, 
             # Insertar registro
             await conn.execute('''
                 INSERT INTO conductores (
-                    cedula, placa, tipo_carga, num_animales, tipo_combustible,
+                    telegram_id, cedula, placa, tipo_carga, num_animales, tipo_combustible,
                     cantidad_galones, factura_dato1, factura_dato2, factura_dato3,
                     factura_foto, bascula, cerdos_vivos, cerdos_muertos, peso, foto_pesaje
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             ''', 
+                data.get('telegram_id'),
                 data.get('cedula'),
                 data.get('placa'),
                 data.get('tipo_carga'),
