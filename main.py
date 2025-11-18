@@ -901,12 +901,11 @@ async def confirmar_numero_factura(message: types.Message, state: FSMContext):
         await state.update_data(numero_factura=numero)
         
         # Preguntar tipo de alimento
-        opciones = [
-            ["1. Levante"],
-            ["2. Engorde/Medicado"],
-            ["3. Finalizador"]
-        ]
-        kb = ReplyKeyboardMarkup(keyboard=opciones, resize_keyboard=True)
+        keyboard = ReplyKeyboardBuilder()
+        keyboard.button(text="1. Levante")
+        keyboard.button(text="2. Engorde/Medicado")
+        keyboard.button(text="3. Finalizador")
+        keyboard.adjust(1)
         
         print("DEBUG: Enviando mensaje de tipo de alimento")
         await message.answer(
@@ -915,7 +914,7 @@ async def confirmar_numero_factura(message: types.Message, state: FSMContext):
             f"1️⃣ *Levante*\n"
             f"2️⃣ *Engorde/Medicado*\n"
             f"3️⃣ *Finalizador*",
-            reply_markup=kb,
+            reply_markup=keyboard.as_markup(resize_keyboard=True),
             parse_mode="Markdown"
         )
         print("DEBUG: Cambiando estado a tipo_alimento")
@@ -958,19 +957,18 @@ async def confirmar_tipo_alimento(message: types.Message, state: FSMContext):
     texto = message.text.strip().lower()
     
     if "2" in texto or "modificar" in texto:
-        opciones = [
-            ["1. Levante"],
-            ["2. Engorde/Medicado"],
-            ["3. Finalizador"]
-        ]
-        kb = ReplyKeyboardMarkup(keyboard=opciones, resize_keyboard=True)
+        keyboard = ReplyKeyboardBuilder()
+        keyboard.button(text="1. Levante")
+        keyboard.button(text="2. Engorde/Medicado")
+        keyboard.button(text="3. Finalizador")
+        keyboard.adjust(1)
         
         await message.answer(
             "✏️ Seleccione nuevamente el *tipo de alimento*:\n\n"
             f"1️⃣ *Levante*\n"
             f"2️⃣ *Engorde/Medicado*\n"
             f"3️⃣ *Finalizador*",
-            reply_markup=kb,
+            reply_markup=keyboard.as_markup(resize_keyboard=True),
             parse_mode="Markdown"
         )
         await state.set_state(ConductoresState.tipo_alimento)
