@@ -889,7 +889,9 @@ async def confirmar_numero_factura(message: types.Message, state: FSMContext):
             parse_mode="Markdown"
         )
         await state.set_state(ConductoresState.numero_factura)
-    elif "1" in texto or "confirmar" in texto:
+        return
+    
+    if "1" in texto or "confirmar" in texto:
         data = await state.get_data()
         numero = data.get("numero_factura_temp")
         await state.update_data(numero_factura=numero)
@@ -912,8 +914,9 @@ async def confirmar_numero_factura(message: types.Message, state: FSMContext):
             parse_mode="Markdown"
         )
         await state.set_state(ConductoresState.tipo_alimento)
-    else:
-        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+        return
+    
+    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
 @dp.message(ConductoresState.tipo_alimento)
 async def procesar_tipo_alimento(message: types.Message, state: FSMContext):
@@ -963,7 +966,9 @@ async def confirmar_tipo_alimento(message: types.Message, state: FSMContext):
             parse_mode="Markdown"
         )
         await state.set_state(ConductoresState.tipo_alimento)
-    elif "1" in texto or "confirmar" in texto:
+        return
+    
+    if "1" in texto or "confirmar" in texto:
         data = await state.get_data()
         tipo = data.get("tipo_alimento_temp")
         await state.update_data(tipo_alimento=tipo)
@@ -975,8 +980,9 @@ async def confirmar_tipo_alimento(message: types.Message, state: FSMContext):
             parse_mode="Markdown"
         )
         await state.set_state(ConductoresState.kilos_comprados)
-    else:
-        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+        return
+    
+    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
 @dp.message(ConductoresState.kilos_comprados)
 async def procesar_kilos_comprados(message: types.Message, state: FSMContext):
@@ -1003,7 +1009,9 @@ async def confirmar_kilos_comprados(message: types.Message, state: FSMContext):
             parse_mode="Markdown"
         )
         await state.set_state(ConductoresState.kilos_comprados)
-    elif "1" in texto or "confirmar" in texto:
+        return
+    
+    if "1" in texto or "confirmar" in texto:
         data = await state.get_data()
         kilos = data.get("kilos_comprados_temp")
         await state.update_data(kilos_comprados=kilos)
@@ -1014,8 +1022,9 @@ async def confirmar_kilos_comprados(message: types.Message, state: FSMContext):
             parse_mode="Markdown"
         )
         await state.set_state(ConductoresState.factura_foto)
-    else:
-        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+        return
+    
+    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
 @dp.message(ConductoresState.factura_foto, F.photo)
 async def procesar_factura_foto(message: types.Message, state: FSMContext):
