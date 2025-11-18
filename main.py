@@ -1108,9 +1108,9 @@ async def confirmar_cerdos_vivos(message: types.Message, state: FSMContext):
                 parse_mode="Markdown"
             )
         
-        # Continuar con el peso
+        # Continuar con el peso de los cerdos vivos
         await message.answer(
-            f"¿Cuánto pesa? _(en kilogramos)_\n"
+            f"¿Cuánto pesan los *{cantidad_vivos} cerdos VIVOS*? _(en kilogramos)_\n"
             f"_(Puede usar decimales con coma)_",
             parse_mode="Markdown"
         )
