@@ -267,14 +267,14 @@ class ConductoresState(StatesGroup):
     cantidad_galones = State()
     confirmar_cantidad_galones = State()
     
-    factura_dato1 = State()
-    confirmar_factura_dato1 = State()
+    numero_factura = State()
+    confirmar_numero_factura = State()
     
-    factura_dato2 = State()
-    confirmar_factura_dato2 = State()
+    tipo_alimento = State()
+    confirmar_tipo_alimento = State()
     
-    factura_dato3 = State()
-    confirmar_factura_dato3 = State()
+    kilos_comprados = State()
+    confirmar_kilos_comprados = State()
     
     factura_foto = State()
     
@@ -728,11 +728,11 @@ async def confirmar_tipo_transporte(message: types.Message, state: FSMContext):
             await message.answer(
                 f"✅ Tipo de carga: *{tipo_carga}*\n\n"
                 f"📋 *DATOS DE LA FACTURA*\n\n"
-                f"Por favor ingrese el *primer dato* de la factura:",
+                f"Por favor ingrese el *número de factura*:",
                 reply_markup=ReplyKeyboardRemove(),
                 parse_mode="Markdown"
             )
-            await state.set_state(ConductoresState.factura_dato1)
+            await state.set_state(ConductoresState.numero_factura)
     else:
         await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
@@ -868,44 +868,154 @@ async def confirmar_cantidad_galones(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
 # 4d. DATOS DE FACTURA (para Concentrado)
-@dp.message(ConductoresState.factura_dato1)
-async def procesar_factura_dato1(message: types.Message, state: FSMContext):
-    """Procesa el primer dato de la factura"""
-    dato1 = message.text.strip()
-    await state.update_data(factura_dato1=dato1)
+@dp.message(ConductoresState.numero_factura)
+async def procesar_numero_factura(message: types.Message, state: FSMContext):
+    """Procesa el número de factura"""
+    numero = message.text.strip()
+    await state.update_data(numero_factura_temp=numero)
     
-    await message.answer(
-        f"✅ Dato 1: *{dato1}*\n\n"
-        f"Ingrese el *segundo dato* de la factura:",
-        parse_mode="Markdown"
-    )
-    await state.set_state(ConductoresState.factura_dato2)
+    await preguntar_confirmacion(message, numero, "número de factura")
+    await state.set_state(ConductoresState.confirmar_numero_factura)
 
-@dp.message(ConductoresState.factura_dato2)
-async def procesar_factura_dato2(message: types.Message, state: FSMContext):
-    """Procesa el segundo dato de la factura"""
-    dato2 = message.text.strip()
-    await state.update_data(factura_dato2=dato2)
+@dp.message(ConductoresState.confirmar_numero_factura)
+async def confirmar_numero_factura(message: types.Message, state: FSMContext):
+    """Confirma el número de factura o permite modificarlo"""
+    texto = message.text.strip().lower()
     
-    await message.answer(
-        f"✅ Dato 2: *{dato2}*\n\n"
-        f"Ingrese el *tercer dato* de la factura:",
-        parse_mode="Markdown"
-    )
-    await state.set_state(ConductoresState.factura_dato3)
+    if "2" in texto or "modificar" in texto:
+        await message.answer(
+            "✏️ Ingrese nuevamente el *número de factura*:",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.numero_factura)
+    elif "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        numero = data.get("numero_factura_temp")
+        await state.update_data(numero_factura=numero)
+        
+        # Preguntar tipo de alimento
+        opciones = [
+            ["1. Levante"],
+            ["2. Engorde/Medicado"],
+            ["3. Finalizador"]
+        ]
+        kb = ReplyKeyboardMarkup(keyboard=opciones, resize_keyboard=True)
+        
+        await message.answer(
+            f"✅ Número de factura: *{numero}*\n\n"
+            f"📋 Seleccione el *tipo de alimento*:\n\n"
+            f"1️⃣ *Levante*\n"
+            f"2️⃣ *Engorde/Medicado*\n"
+            f"3️⃣ *Finalizador*",
+            reply_markup=kb,
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.tipo_alimento)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
-@dp.message(ConductoresState.factura_dato3)
-async def procesar_factura_dato3(message: types.Message, state: FSMContext):
-    """Procesa el tercer dato de la factura y pide foto"""
-    dato3 = message.text.strip()
-    await state.update_data(factura_dato3=dato3)
+@dp.message(ConductoresState.tipo_alimento)
+async def procesar_tipo_alimento(message: types.Message, state: FSMContext):
+    """Procesa la selección del tipo de alimento"""
+    texto = message.text.strip().lower()
     
-    await message.answer(
-        f"✅ Dato 3: *{dato3}*\n\n"
-        f"📸 Ahora envíe una *foto de la factura*:",
-        parse_mode="Markdown"
-    )
-    await state.set_state(ConductoresState.factura_foto)
+    tipo = None
+    if "1" in texto or "levante" in texto:
+        tipo = "Levante"
+    elif "2" in texto or "engorde" in texto or "medicado" in texto:
+        tipo = "Engorde/Medicado"
+    elif "3" in texto or "finalizador" in texto:
+        tipo = "Finalizador"
+    else:
+        await message.answer(
+            "⚠️ Opción no válida.\n\n"
+            "Seleccione:\n"
+            "1️⃣ Levante\n"
+            "2️⃣ Engorde/Medicado\n"
+            "3️⃣ Finalizador"
+        )
+        return
+    
+    await state.update_data(tipo_alimento_temp=tipo)
+    await preguntar_confirmacion(message, tipo, "tipo de alimento")
+    await state.set_state(ConductoresState.confirmar_tipo_alimento)
+
+@dp.message(ConductoresState.confirmar_tipo_alimento)
+async def confirmar_tipo_alimento(message: types.Message, state: FSMContext):
+    """Confirma el tipo de alimento o permite modificarlo"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        opciones = [
+            ["1. Levante"],
+            ["2. Engorde/Medicado"],
+            ["3. Finalizador"]
+        ]
+        kb = ReplyKeyboardMarkup(keyboard=opciones, resize_keyboard=True)
+        
+        await message.answer(
+            "✏️ Seleccione nuevamente el *tipo de alimento*:\n\n"
+            f"1️⃣ *Levante*\n"
+            f"2️⃣ *Engorde/Medicado*\n"
+            f"3️⃣ *Finalizador*",
+            reply_markup=kb,
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.tipo_alimento)
+    elif "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        tipo = data.get("tipo_alimento_temp")
+        await state.update_data(tipo_alimento=tipo)
+        
+        await message.answer(
+            f"✅ Tipo de alimento: *{tipo}*\n\n"
+            f"📊 Ingrese los *kilos comprados* (número):",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.kilos_comprados)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+@dp.message(ConductoresState.kilos_comprados)
+async def procesar_kilos_comprados(message: types.Message, state: FSMContext):
+    """Procesa los kilos comprados"""
+    es_valido, kilos, error = validar_galones(message.text.strip())
+    
+    if not es_valido:
+        await message.answer(f"⚠️ {error}\n\nIntente nuevamente:")
+        return
+    
+    await state.update_data(kilos_comprados_temp=kilos)
+    await preguntar_confirmacion(message, f"{kilos:,.2f} kg", "kilos comprados")
+    await state.set_state(ConductoresState.confirmar_kilos_comprados)
+
+@dp.message(ConductoresState.confirmar_kilos_comprados)
+async def confirmar_kilos_comprados(message: types.Message, state: FSMContext):
+    """Confirma los kilos comprados o permite modificarlos"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        await message.answer(
+            "✏️ Ingrese nuevamente los *kilos comprados*:",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.kilos_comprados)
+    elif "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        kilos = data.get("kilos_comprados_temp")
+        await state.update_data(kilos_comprados=kilos)
+        
+        await message.answer(
+            f"✅ Kilos comprados: *{kilos:,.2f} kg*\n\n"
+            f"📸 Ahora envíe una *foto de la factura*:",
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.factura_foto)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
 @dp.message(ConductoresState.factura_foto, F.photo)
 async def procesar_factura_foto(message: types.Message, state: FSMContext):
@@ -1257,9 +1367,9 @@ def crear_resumen_conductor(data: dict) -> str:
         lineas.append(f"📊 Galones: {data.get('cantidad_galones'):,.2f}")
         
     elif tipo_carga == "Concentrado":
-        lineas.append(f"📋 Factura - Dato 1: {data.get('factura_dato1')}")
-        lineas.append(f"📋 Factura - Dato 2: {data.get('factura_dato2')}")
-        lineas.append(f"📋 Factura - Dato 3: {data.get('factura_dato3')}")
+        lineas.append(f"📋 Número de factura: {data.get('numero_factura')}")
+        lineas.append(f"📋 Tipo de alimento: {data.get('tipo_alimento')}")
+        lineas.append(f"📋 Kilos comprados: {data.get('kilos_comprados'):,.2f} kg")
     
     lineas.append(f"🏢 Báscula: {data.get('bascula')}")
     
@@ -1320,9 +1430,9 @@ async def guardar_registro_conductor(message: types.Message, state: FSMContext, 
                 data.get('num_animales'),
                 data.get('tipo_combustible'),
                 data.get('cantidad_galones'),
-                data.get('factura_dato1'),
-                data.get('factura_dato2'),
-                data.get('factura_dato3'),
+                data.get('numero_factura'),
+                data.get('tipo_alimento'),
+                data.get('kilos_comprados'),
                 data.get('factura_foto'),
                 data.get('bascula'),
                 data.get('cerdos_vivos'),
@@ -1381,9 +1491,9 @@ async def enviar_notificacion_grupo_conductor(data: dict):
             
         elif tipo_carga == "Concentrado":
             mensaje_lineas.append("📋 *DATOS DE FACTURA:*")
-            mensaje_lineas.append(f"   • Dato 1: {data.get('factura_dato1')}")
-            mensaje_lineas.append(f"   • Dato 2: {data.get('factura_dato2')}")
-            mensaje_lineas.append(f"   • Dato 3: {data.get('factura_dato3')}")
+            mensaje_lineas.append(f"   • Número de factura: {data.get('numero_factura')}")
+            mensaje_lineas.append(f"   • Tipo de alimento: {data.get('tipo_alimento')}")
+            mensaje_lineas.append(f"   • Kilos comprados: {data.get('kilos_comprados'):,.2f} kg")
             if data.get('factura_foto'):
                 mensaje_lineas.append(f"   • [Ver foto de factura]({data.get('factura_foto')})")
         

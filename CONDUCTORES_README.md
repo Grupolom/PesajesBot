@@ -32,9 +32,12 @@ Opciones disponibles:
 - Validación: Número positivo (acepta decimales)
 
 #### 📦 Para Concentrado:
-- Pregunta: "Dato 1 de la factura"
-- Pregunta: "Dato 2 de la factura"
-- Pregunta: "Dato 3 de la factura"
+- Pregunta: "Número de factura"
+- Confirmación: "1. Confirmar / 2. Modificar"
+- Pregunta: "Tipo de alimento" (Levante / Engorde/Medicado / Finalizador)
+- Confirmación: "1. Confirmar / 2. Modificar"
+- Pregunta: "Kilos comprados"
+- Confirmación: "1. Confirmar / 2. Modificar"
 - Pregunta: "Envíe foto de la factura"
 
 ### 5️⃣ Selección de Báscula
