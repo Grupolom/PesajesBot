@@ -621,15 +621,19 @@ async def confirmar_placa_conductor(message: types.Message, state: FSMContext):
         
         # Crear teclado con opciones
         keyboard = ReplyKeyboardBuilder()
-        keyboard.button(text="1. Lechones (cerdos pequeños)")
-        keyboard.button(text="2. Concentrado (alimento)")
-        keyboard.button(text="3. Cerdos Gordos (para venta)")
-        keyboard.button(text="4. Combustible (diesel/corriente)")
-        keyboard.adjust(1)  # 1 botón por fila para que se vean bien
+        keyboard.button(text="1. Lechones")
+        keyboard.button(text="2. Concentrado")
+        keyboard.button(text="3. Cerdos Gordos")
+        keyboard.button(text="4. Combustible")
+        keyboard.adjust(2, 2)
         
         await message.answer(
             f"✅ Placa: *{placa}*\n\n"
             f"¿Qué va a transportar?\n\n"
+            f"1️⃣ Lechones (cerdos pequeños)\n"
+            f"2️⃣ Concentrado (alimento)\n"
+            f"3️⃣ Cerdos Gordos (para venta)\n"
+            f"4️⃣ Combustible (diesel/corriente)\n\n"
             f"Seleccione una opción:",
             reply_markup=keyboard.as_markup(resize_keyboard=True),
             parse_mode="Markdown"
@@ -658,44 +662,79 @@ async def procesar_tipo_transporte(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Opción no válida. Por favor seleccione una de las opciones del menú.")
         return
     
-    await state.update_data(tipo_carga=tipo_carga)
+    await state.update_data(tipo_carga_temp=tipo_carga)
+    await preguntar_confirmacion(message, tipo_carga, "tipo de transporte")
+    await state.set_state(ConductoresState.confirmar_tipo_transporte)
+
+@dp.message(ConductoresState.confirmar_tipo_transporte)
+async def confirmar_tipo_transporte(message: types.Message, state: FSMContext):
+    """Confirma el tipo de transporte o permite modificarlo"""
+    texto = message.text.strip().lower()
     
-    # Dependiendo del tipo de carga, hacer diferentes preguntas
-    if tipo_carga == "Lechones" or tipo_carga == "Cerdos Gordos":
-        animal_tipo = "lechones" if tipo_carga == "Lechones" else "cerdos gordos"
-        await message.answer(
-            f"✅ Tipo de carga: *{tipo_carga}*\n\n"
-            f"¿Cuántos {animal_tipo} va a transportar?\n"
-            f"_(Ingrese solo el número)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(ConductoresState.num_animales)
-        
-    elif tipo_carga == "Combustible":
+    if "2" in texto or "modificar" in texto:
+        # Volver a mostrar opciones
         keyboard = ReplyKeyboardBuilder()
-        keyboard.button(text="Diesel")
-        keyboard.button(text="Corriente")
-        keyboard.adjust(2)
+        keyboard.button(text="1. Lechones")
+        keyboard.button(text="2. Concentrado")
+        keyboard.button(text="3. Cerdos Gordos")
+        keyboard.button(text="4. Combustible")
+        keyboard.adjust(2, 2)
         
         await message.answer(
-            f"✅ Tipo de carga: *{tipo_carga}*\n\n"
-            f"¿Qué tipo de combustible?\n\n"
-            f"Seleccione una opción:",
-            reply_markup=keyboard.as_markup(resize_keyboard=True),
-            parse_mode="Markdown"
+            "¿Qué va a transportar?\n\n"
+            "1️⃣ Lechones (cerdos pequeños)\n"
+            "2️⃣ Concentrado (alimento)\n"
+            "3️⃣ Cerdos Gordos (para venta)\n"
+            "4️⃣ Combustible (diesel/corriente)\n\n"
+            "Seleccione una opción:",
+            reply_markup=keyboard.as_markup(resize_keyboard=True)
         )
-        await state.set_state(ConductoresState.tipo_combustible)
+        await state.set_state(ConductoresState.tipo_transporte)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        tipo_carga = data.get("tipo_carga_temp")
+        await state.update_data(tipo_carga=tipo_carga)
+    
+        # Dependiendo del tipo de carga, hacer diferentes preguntas
+        if tipo_carga == "Lechones" or tipo_carga == "Cerdos Gordos":
+            animal_tipo = "lechones" if tipo_carga == "Lechones" else "cerdos gordos"
+            await message.answer(
+                f"✅ Tipo de carga: *{tipo_carga}*\n\n"
+                f"¿Cuántos {animal_tipo} va a transportar?\n"
+                f"_(Ingrese solo el número)_",
+                reply_markup=ReplyKeyboardRemove(),
+                parse_mode="Markdown"
+            )
+            await state.set_state(ConductoresState.num_animales)
         
-    elif tipo_carga == "Concentrado":
-        await message.answer(
-            f"✅ Tipo de carga: *{tipo_carga}*\n\n"
-            f"📋 *DATOS DE LA FACTURA*\n\n"
-            f"Por favor ingrese el *primer dato* de la factura:",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(ConductoresState.factura_dato1)
+        elif tipo_carga == "Combustible":
+            keyboard = ReplyKeyboardBuilder()
+            keyboard.button(text="Diesel")
+            keyboard.button(text="Corriente")
+            keyboard.adjust(2)
+            
+            await message.answer(
+                f"✅ Tipo de carga: *{tipo_carga}*\n\n"
+                f"¿Qué tipo de combustible?\n\n"
+                f"Seleccione una opción:",
+                reply_markup=keyboard.as_markup(resize_keyboard=True),
+                parse_mode="Markdown"
+            )
+            await state.set_state(ConductoresState.tipo_combustible)
+        
+        elif tipo_carga == "Concentrado":
+            await message.answer(
+                f"✅ Tipo de carga: *{tipo_carga}*\n\n"
+                f"📋 *DATOS DE LA FACTURA*\n\n"
+                f"Por favor ingrese el *primer dato* de la factura:",
+                reply_markup=ReplyKeyboardRemove(),
+                parse_mode="Markdown"
+            )
+            await state.set_state(ConductoresState.factura_dato1)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
 # 4a. NÚMERO DE ANIMALES (para Lechones o Cerdos Gordos)
 @dp.message(ConductoresState.num_animales)
@@ -836,19 +875,20 @@ async def preguntar_bascula(message: types.Message, state: FSMContext):
     keyboard = ReplyKeyboardBuilder()
     opciones_texto = []
     
-    # Báscula Italcol: solo para concentrado
+    # Báscula Italcol: solo para concentrado (ÚNICA OPCIÓN)
     if tipo_carga == "Concentrado":
         keyboard.button(text="1. Báscula Italcol")
         opciones_texto.append("1️⃣ Báscula Italcol")
-    
-    # Báscula Bogotá: solo para cerdos gordos
-    if tipo_carga == "Cerdos Gordos":
-        keyboard.button(text="2. Bogotá")
-        opciones_texto.append("2️⃣ Bogotá")
-    
-    # Finca Tranquera: disponible para todos
-    keyboard.button(text="3. Finca Tranquera")
-    opciones_texto.append("3️⃣ Finca Tranquera")
+    else:
+        # Para otros tipos de carga
+        # Báscula Bogotá: solo para cerdos gordos
+        if tipo_carga == "Cerdos Gordos":
+            keyboard.button(text="2. Bogotá")
+            opciones_texto.append("2️⃣ Bogotá")
+        
+        # Finca Tranquera: disponible para todos excepto concentrado
+        keyboard.button(text="3. Finca Tranquera")
+        opciones_texto.append("3️⃣ Finca Tranquera")
     
     keyboard.adjust(1)  # Una opción por fila
     
@@ -914,42 +954,38 @@ async def procesar_bascula(message: types.Message, state: FSMContext):
 # 6. FLUJO ESPECIAL BOGOTÁ - Cerdos vivos
 @dp.message(ConductoresState.cerdos_vivos)
 async def procesar_cerdos_vivos(message: types.Message, state: FSMContext):
-    """Procesa cantidad de cerdos vivos (solo para Bogotá)"""
-    es_valido, cantidad, error = validar_numero_entero(message.text.strip(), minimo=0, maximo=5000)
+    """Procesa cantidad de cerdos vivos y calcula automáticamente los muertos"""
+    es_valido, cantidad_vivos, error = validar_numero_entero(message.text.strip(), minimo=0, maximo=5000)
     
     if not es_valido:
         await message.answer(f"⚠️ {error}\n\nIntente nuevamente:")
         return
     
-    await state.update_data(cerdos_vivos=cantidad)
+    # Obtener el total de animales para calcular los muertos
+    data = await state.get_data()
+    total_animales = data.get('num_animales', 0)
+    cerdos_muertos = total_animales - cantidad_vivos
     
-    await message.answer(
-        f"✅ Cerdos vivos: *{cantidad}*\n\n"
-        f"¿Hay cerdos *MUERTOS*?\n\n"
-        f"Si hay, ingrese la cantidad.\n"
-        f"Si no hay, ingrese *0*",
-        parse_mode="Markdown"
+    await state.update_data(
+        cerdos_vivos=cantidad_vivos,
+        cerdos_muertos=cerdos_muertos
     )
-    await state.set_state(ConductoresState.cerdos_muertos)
-
-# 7. FLUJO ESPECIAL BOGOTÁ - Cerdos muertos
-@dp.message(ConductoresState.cerdos_muertos)
-async def procesar_cerdos_muertos(message: types.Message, state: FSMContext):
-    """Procesa cantidad de cerdos muertos (solo para Bogotá)"""
-    es_valido, cantidad, error = validar_numero_entero(message.text.strip(), minimo=0, maximo=1000)
     
-    if not es_valido:
-        await message.answer(f"⚠️ {error}\n\nIntente nuevamente:")
-        return
-    
-    await state.update_data(cerdos_muertos=cantidad)
-    
-    if cantidad > 0:
+    if cerdos_muertos > 0:
         # ALERTA ESPECIAL si hay cerdos muertos
         await message.answer(
-            f"🚨 *ALERTA: {cantidad} CERDOS MUERTOS* 🚨\n\n"
-            f"⚠️ ¡ATENCIÓN! SE REPORTAN ANIMALES MUERTOS\n"
-            f"Cantidad: *{cantidad}*",
+            f"✅ Cerdos vivos: *{cantidad_vivos}*\n"
+            f"📊 Total de cerdos: *{total_animales}*\n\n"
+            f"🚨 *ALERTA: {cerdos_muertos} CERDOS MUERTOS* 🚨\n\n"
+            f"⚠️ ¡ATENCIÓN! SE DETECTARON ANIMALES MUERTOS\n"
+            f"Cantidad: *{cerdos_muertos}*",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(
+            f"✅ Cerdos vivos: *{cantidad_vivos}*\n"
+            f"📊 Total de cerdos: *{total_animales}*\n"
+            f"✅ Sin cerdos muertos",
             parse_mode="Markdown"
         )
     
@@ -961,7 +997,7 @@ async def procesar_cerdos_muertos(message: types.Message, state: FSMContext):
     )
     await state.set_state(ConductoresState.peso)
 
-# 8. PESO
+# 7. PESO
 @dp.message(ConductoresState.peso)
 async def procesar_peso(message: types.Message, state: FSMContext):
     """Procesa el peso del pesaje"""
