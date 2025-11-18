@@ -1936,14 +1936,7 @@ async def mostrar_capacidad_silo(message: types.Message, state: FSMContext):
             await release_db_connection(conn)
     
     # Volver al menú principal
-    await message.answer(
-        "\n¿Desea hacer algo más?\n\n"
-        "1️⃣ Registrar Pesaje\n"
-        "2️⃣ Consultar Capacidad de Silos\n"
-        "3️⃣ Restar Peso de Silo\n\n"
-        "Escriba el número de la opción:"
-    )
-    await state.set_state(RegistroState.menu_principal)
+    await volver_menu_principal(message, state)
 
 # ==================== RESTAR PESO DE SILO ==================== #
 @dp.message(RegistroState.restar_silo_numero)
@@ -2013,14 +2006,7 @@ async def restar_peso_del_silo(message: types.Message, state: FSMContext):
             await release_db_connection(conn)
     
     # Volver al menú principal
-    await message.answer(
-        "\n¿Desea hacer algo más?\n\n"
-        "1️⃣ Registrar Pesaje\n"
-        "2️⃣ Consultar Capacidad de Silos\n"
-        "3️⃣ Restar Peso de Silo\n\n"
-        "Escriba el número de la opción:"
-    )
-    await state.set_state(RegistroState.menu_principal)
+    await volver_menu_principal(message, state)
 
 @dp.message(RegistroState.confirmar_restar_peso, F.text == "2")
 async def editar_restar_peso(message: types.Message, state: FSMContext):
@@ -2668,14 +2654,7 @@ async def guardar_registro(message: types.Message, state: FSMContext):
                     print(f"⚠️ Error al enviar mensaje de texto al grupo: {e2}")
         
         # Volver al menú principal
-        await message.answer(
-            "\n¿Desea hacer algo más?\n\n"
-            "1️⃣ Registrar Pesaje\n"
-            "2️⃣ Consultar Capacidad de Silos\n"
-            "3️⃣ Restar Peso de Silo\n\n"
-            "Escriba el número de la opción:"
-        )
-        await state.set_state(RegistroState.menu_principal)
+        await volver_menu_principal(message, state)
         
     except Exception as e:
         print(f"❌ Error en guardar_registro: {e}")
