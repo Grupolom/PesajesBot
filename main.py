@@ -881,8 +881,10 @@ async def procesar_numero_factura(message: types.Message, state: FSMContext):
 async def confirmar_numero_factura(message: types.Message, state: FSMContext):
     """Confirma el número de factura o permite modificarlo"""
     texto = message.text.strip().lower()
+    print(f"DEBUG confirmar_numero_factura: texto='{texto}'")
     
     if "2" in texto or "modificar" in texto:
+        print("DEBUG: Entrando a modificar")
         await message.answer(
             "✏️ Ingrese nuevamente el *número de factura*:",
             reply_markup=ReplyKeyboardRemove(),
@@ -892,8 +894,10 @@ async def confirmar_numero_factura(message: types.Message, state: FSMContext):
         return
     
     if "1" in texto or "confirmar" in texto:
+        print("DEBUG: Entrando a confirmar")
         data = await state.get_data()
         numero = data.get("numero_factura_temp")
+        print(f"DEBUG: numero={numero}")
         await state.update_data(numero_factura=numero)
         
         # Preguntar tipo de alimento
@@ -904,6 +908,7 @@ async def confirmar_numero_factura(message: types.Message, state: FSMContext):
         ]
         kb = ReplyKeyboardMarkup(keyboard=opciones, resize_keyboard=True)
         
+        print("DEBUG: Enviando mensaje de tipo de alimento")
         await message.answer(
             f"✅ Número de factura: *{numero}*\n\n"
             f"📋 Seleccione el *tipo de alimento*:\n\n"
@@ -913,9 +918,12 @@ async def confirmar_numero_factura(message: types.Message, state: FSMContext):
             reply_markup=kb,
             parse_mode="Markdown"
         )
+        print("DEBUG: Cambiando estado a tipo_alimento")
         await state.set_state(ConductoresState.tipo_alimento)
+        print("DEBUG: Estado cambiado exitosamente")
         return
     
+    print("DEBUG: Opción no válida")
     await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
 @dp.message(ConductoresState.tipo_alimento)
