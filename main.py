@@ -2065,7 +2065,7 @@ async def medicion_finalizar_registro(message: types.Message, state: FSMContext)
         f"• Silos procesados: {len(silos_procesados)}\n"
         f"• Total descargado: *{total_descargado:.2f} ton*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Las fotos y datos se han enviado al grupo."
+        "¡Felicidades! Ha registrado correctamente la información."
     )
 
     await message.answer(resumen_usuario, parse_mode="Markdown")
