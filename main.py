@@ -242,6 +242,21 @@ class RegistroState(StatesGroup):
     descarga_numero_lote = State()
     descarga_confirmar_lote = State()
 
+    # Estados para Medición de Silos
+    medicion_cedula = State()
+    medicion_confirmar_cedula = State()
+    medicion_seleccion_silos = State()
+    medicion_confirmar_silos = State()
+    medicion_tipo_comida = State()
+    medicion_confirmar_tipo_comida = State()
+    medicion_peso_antes = State()
+    medicion_confirmar_peso_antes = State()
+    medicion_foto_antes = State()
+    medicion_peso_despues = State()
+    medicion_confirmar_peso_despues = State()
+    medicion_foto_despues = State()
+    medicion_agregar_mas = State()
+
 # ==================== ESTADOS PARA MENU CONDUCTORES ==================== #
 class ConductoresState(StatesGroup):
     """Estados separados para el menú de conductores"""
@@ -341,6 +356,184 @@ def validar_numero_lote(valor: str) -> tuple[bool, str]:
 
     return True, ""
 
+# ==================== VALIDACIONES MEDICIÓN DE SILOS ==================== #
+
+def validar_seleccion_silos(valor: str) -> tuple[bool, list[int], str]:
+    """
+    Valida selección de silos: números del 1 al 6 separados por comas
+    Retorna: (es_valido, lista_silos, mensaje_error)
+    """
+    # Limpiar espacios
+    valor_limpio = valor.replace(" ", "")
+
+    # Validar formato básico
+    if not re.match(r'^[1-6](,[1-6])*$', valor_limpio):
+        return False, [], "Formato incorrecto. Use números del 1 al 6 separados por comas (ej: 1,3,5)"
+
+    # Extraer números
+    try:
+        silos = [int(s) for s in valor_limpio.split(',')]
+
+        # Verificar duplicados
+        if len(silos) != len(set(silos)):
+            duplicados = [s for s in set(silos) if silos.count(s) > 1]
+            return False, [], f"Silos duplicados detectados: {', '.join(map(str, duplicados))}"
+
+        # Ordenar silos
+        silos_ordenados = sorted(silos)
+
+        return True, silos_ordenados, ""
+
+    except ValueError:
+        return False, [], "Error al procesar los números de silos"
+
+def validar_peso_toneladas(valor: str) -> tuple[bool, float, str]:
+    """
+    Valida peso en toneladas: decimal positivo, 0-50 toneladas
+    Retorna: (es_valido, peso, mensaje_error)
+    """
+    # Reemplazar coma por punto para decimales
+    valor_normalizado = valor.replace(",", ".")
+
+    try:
+        peso = float(valor_normalizado)
+
+        if peso < 0:
+            return False, 0.0, "El peso no puede ser negativo"
+
+        if peso > 50:
+            return False, 0.0, "El peso no puede superar 50 toneladas (límite de capacidad)"
+
+        # Redondear a 2 decimales
+        peso = round(peso, 2)
+
+        return True, peso, ""
+
+    except ValueError:
+        return False, 0.0, "Debe ingresar un número válido (use punto o coma para decimales)"
+
+# ==================== SISTEMA DE ALERTAS DE SEGURIDAD ==================== #
+
+async def verificar_multiples_cedulas(telegram_user_id: int, cedula_actual: str) -> tuple[bool, list[str]]:
+    """
+    Verifica si un telegram_user_id ha usado diferentes cédulas previamente.
+
+    Args:
+        telegram_user_id: ID del usuario de Telegram
+        cedula_actual: Cédula que acaba de ingresar
+
+    Returns:
+        (hay_alerta, lista_cedulas_diferentes)
+    """
+    conn = None
+    cedulas_encontradas = set()
+
+    try:
+        conn = await get_db_connection()
+        if not conn:
+            print("⚠️ No se pudo verificar múltiples cédulas (sin conexión a BD)")
+            return False, []
+
+        # Consultar en tabla de Registro de Animales
+        registros_animales = await conn.fetch('''
+            SELECT DISTINCT cedula_operario
+            FROM operario_sitio3_animales
+            WHERE telegram_user_id = $1
+            AND cedula_operario != $2
+        ''', telegram_user_id, cedula_actual)
+
+        for reg in registros_animales:
+            cedulas_encontradas.add(reg['cedula_operario'])
+
+        # Consultar en tabla de Descarga de Animales
+        registros_descarga = await conn.fetch('''
+            SELECT DISTINCT cedula_operario
+            FROM operario_sitio3_descarga_animales
+            WHERE telegram_user_id = $1
+            AND cedula_operario != $2
+        ''', telegram_user_id, cedula_actual)
+
+        for reg in registros_descarga:
+            cedulas_encontradas.add(reg['cedula_operario'])
+
+        # Si encontramos otras cédulas, hay alerta
+        if cedulas_encontradas:
+            print(f"🚨 ALERTA: Usuario {telegram_user_id} ha usado múltiples cédulas:")
+            print(f"   - Cédula actual: {cedula_actual}")
+            print(f"   - Cédulas previas: {', '.join(sorted(cedulas_encontradas))}")
+            return True, sorted(list(cedulas_encontradas))
+
+        return False, []
+
+    except Exception as e:
+        print(f"❌ Error en verificación de múltiples cédulas: {e}")
+        import traceback
+        traceback.print_exc()
+        return False, []
+
+    finally:
+        if conn:
+            await release_db_connection(conn)
+
+async def enviar_alerta_seguridad(
+    telegram_user_id: int,
+    username: str,
+    cedula_actual: str,
+    cedulas_previas: list[str],
+    tipo_operacion: str
+):
+    """
+    Envía alerta de seguridad al grupo de Telegram cuando se detectan múltiples cédulas.
+
+    Args:
+        telegram_user_id: ID del usuario de Telegram
+        username: Nombre de usuario de Telegram (@username o nombre completo)
+        cedula_actual: Cédula que acaba de usar
+        cedulas_previas: Lista de cédulas diferentes usadas anteriormente
+        tipo_operacion: "Registro de Animales" o "Descarga de Animales"
+    """
+    if not GROUP_CHAT_ID:
+        print("⚠️ No se puede enviar alerta (GROUP_CHAT_ID no configurado)")
+        return
+
+    try:
+        fecha_hora = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+
+        # Formatear lista de cédulas previas
+        cedulas_previas_texto = '\n'.join([f"   • `{c}`" for c in cedulas_previas])
+
+        mensaje_alerta = (
+            "🚨 *ALERTA DE SEGURIDAD - MÚLTIPLES CÉDULAS*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "⚠️ Se ha detectado que un mismo usuario\n"
+            "de Telegram ha usado diferentes cédulas.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📱 *DATOS DEL USUARIO:*\n\n"
+            f"• Usuario Telegram: {username}\n"
+            f"• ID Telegram: `{telegram_user_id}`\n"
+            f"• Operación: {tipo_operacion}\n"
+            f"• Fecha/Hora: {fecha_hora}\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🆔 *CÉDULAS DETECTADAS:*\n\n"
+            f"• Cédula ACTUAL: `{cedula_actual}`\n\n"
+            f"• Cédulas PREVIAS:\n{cedulas_previas_texto}\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "⚠️ *ACCIÓN REQUERIDA:*\n"
+            "Por favor verificar la identidad del operario\n"
+            "y tomar las medidas necesarias.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        )
+
+        await bot.send_message(GROUP_CHAT_ID, mensaje_alerta, parse_mode="Markdown")
+        print(f"✅ Alerta de seguridad enviada al grupo (User ID: {telegram_user_id})")
+
+    except Exception as e:
+        print(f"❌ Error enviando alerta de seguridad: {e}")
+        import traceback
+        traceback.print_exc()
+
+# ==================== FIN SISTEMA DE ALERTAS ==================== #
+
 async def volver_menu_principal(message: types.Message, state: FSMContext):
     """Función helper para volver al menú principal multi-perfil"""
     await state.clear()
@@ -362,7 +555,7 @@ async def volver_menu_sitio3(message: types.Message, state: FSMContext):
         "🐷 *OPERARIO SITIO 3*\n\n"
         "Seleccione una opción:\n\n"
         "1️⃣ Registro de Animales\n"
-        "2️⃣ Medición de Silos _(Próximamente)_\n"
+        "2️⃣ Medición de Silos \n"
         "3️⃣ Descarga de Animales \n\n"
         "Escriba el número de la opción:\n\n"
         "💡 _Escriba 0 para volver al menú principal_",
@@ -466,13 +659,17 @@ async def sitio3_registro_animales(message: types.Message, state: FSMContext):
 
 @dp.message(RegistroState.sitio3_menu, F.text == "2")
 async def sitio3_medicion_silos(message: types.Message, state: FSMContext):
-    """Sitio 3 - Opción 2: Medición de Silos (Placeholder)"""
-    await message.answer(
-        "🚧 *MEDICIÓN DE SILOS*\n\n"
-        "Esta funcionalidad estará disponible próximamente.\n\n",
-        parse_mode="Markdown"
+    """Sitio 3 - Opción 2: Medición de Silos"""
+    # Inicializar datos de sesión
+    session_id = str(uuid.uuid4())
+    await state.update_data(
+        medicion_session_id=session_id,
+        medicion_silos_procesados=[],  # Lista de silos ya procesados
+        medicion_silos_pendientes=[],  # Lista de silos por procesar
+        medicion_indice_silo_actual=0
     )
-    await volver_menu_sitio3(message, state)
+    await message.answer("¿Cuál es su cédula?")
+    await state.set_state(RegistroState.medicion_cedula)
 
 @dp.message(RegistroState.sitio3_menu, F.text == "3")
 async def sitio3_descarga_animales(message: types.Message, state: FSMContext):
@@ -510,6 +707,32 @@ async def sitio3_get_cedula(message: types.Message, state: FSMContext):
 @dp.message(RegistroState.sitio3_confirmar_cedula, F.text == "1")
 async def sitio3_confirmar_cedula_si(message: types.Message, state: FSMContext):
     """Confirma cédula y pasa a cantidad de animales"""
+    # Verificar si hay múltiples cédulas (alerta de seguridad)
+    data = await state.get_data()
+    cedula = data.get('sitio3_cedula')
+    telegram_user_id = message.from_user.id
+
+    hay_alerta, cedulas_previas = await verificar_multiples_cedulas(telegram_user_id, cedula)
+
+    if hay_alerta:
+        # Obtener nombre de usuario para la alerta
+        username = message.from_user.username
+        if username:
+            username = f"@{username}"
+        else:
+            first_name = message.from_user.first_name or ""
+            last_name = message.from_user.last_name or ""
+            username = f"{first_name} {last_name}".strip() or "Sin nombre"
+
+        # Enviar alerta al grupo
+        await enviar_alerta_seguridad(
+            telegram_user_id=telegram_user_id,
+            username=username,
+            cedula_actual=cedula,
+            cedulas_previas=cedulas_previas,
+            tipo_operacion="Registro de Animales"
+        )
+
     await message.answer("¿Cuántos animales hay en este corral?")
     await state.set_state(RegistroState.sitio3_cantidad_animales)
 
@@ -890,6 +1113,32 @@ async def descarga_get_cedula(message: types.Message, state: FSMContext):
 @dp.message(RegistroState.descarga_confirmar_cedula, F.text == "1")
 async def descarga_confirmar_cedula_si(message: types.Message, state: FSMContext):
     """Confirma cédula y pasa a cantidad de lechones"""
+    # Verificar si hay múltiples cédulas (alerta de seguridad)
+    data = await state.get_data()
+    cedula = data.get('descarga_cedula')
+    telegram_user_id = message.from_user.id
+
+    hay_alerta, cedulas_previas = await verificar_multiples_cedulas(telegram_user_id, cedula)
+
+    if hay_alerta:
+        # Obtener nombre de usuario para la alerta
+        username = message.from_user.username
+        if username:
+            username = f"@{username}"
+        else:
+            first_name = message.from_user.first_name or ""
+            last_name = message.from_user.last_name or ""
+            username = f"{first_name} {last_name}".strip() or "Sin nombre"
+
+        # Enviar alerta al grupo
+        await enviar_alerta_seguridad(
+            telegram_user_id=telegram_user_id,
+            username=username,
+            cedula_actual=cedula,
+            cedulas_previas=cedulas_previas,
+            tipo_operacion="Descarga de Animales"
+        )
+
     await message.answer(
         "🐷 Ingrese la cantidad de lechones\n\n"
         "⚠️ Nota: Los lechones son cerdos jóvenes que\n"
@@ -1183,6 +1432,653 @@ async def descarga_confirmar_lote_invalido(message: types.Message, state: FSMCon
     await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
 
 # ==================== FIN DESCARGA DE ANIMALES ==================== #
+
+# ==================== OPERARIO SITIO 3 - MEDICIÓN DE SILOS ==================== #
+
+# PASO 1: Cédula
+@dp.message(RegistroState.medicion_cedula)
+async def medicion_get_cedula(message: types.Message, state: FSMContext):
+    """Captura y valida la cédula del operario"""
+    cedula = message.text.strip()
+
+    if not validar_cedula_sitio3(cedula):
+        await message.answer(
+            "⚠️ Cédula inválida.\n\n"
+            "Debe contener solo números y tener entre 6 y 12 dígitos.\n\n"
+            "Por favor, intente nuevamente:"
+        )
+        return
+
+    await state.update_data(medicion_cedula=cedula)
+    await message.answer(
+        f"📋 Cédula ingresada: *{cedula}*\n\n"
+        "¿Es correcta?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.medicion_confirmar_cedula)
+
+@dp.message(RegistroState.medicion_confirmar_cedula, F.text == "1")
+async def medicion_confirmar_cedula_si(message: types.Message, state: FSMContext):
+    """Confirma cédula y pasa a selección de silos"""
+    # Verificar si hay múltiples cédulas (alerta de seguridad)
+    data = await state.get_data()
+    cedula = data.get('medicion_cedula')
+    telegram_user_id = message.from_user.id
+
+    hay_alerta, cedulas_previas = await verificar_multiples_cedulas(telegram_user_id, cedula)
+
+    if hay_alerta:
+        username = message.from_user.username
+        if username:
+            username = f"@{username}"
+        else:
+            first_name = message.from_user.first_name or ""
+            last_name = message.from_user.last_name or ""
+            username = f"{first_name} {last_name}".strip() or "Sin nombre"
+
+        await enviar_alerta_seguridad(
+            telegram_user_id=telegram_user_id,
+            username=username,
+            cedula_actual=cedula,
+            cedulas_previas=cedulas_previas,
+            tipo_operacion="Medición de Silos"
+        )
+
+    await message.answer(
+        "📦 *Selección de Silos*\n\n"
+        "La granja tiene 6 silos disponibles (Silo 1 al Silo 6).\n\n"
+        "Puede seleccionar uno o varios silos separados por comas.\n\n"
+        "*Ejemplos válidos:*\n"
+        "• `1` (solo silo 1)\n"
+        "• `2,4` (silos 2 y 4)\n"
+        "• `1,3,5` (silos 1, 3 y 5)\n"
+        "• `1,2,3,4,5,6` (todos los silos)\n\n"
+        "Por favor ingrese los números de silos:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.medicion_seleccion_silos)
+
+@dp.message(RegistroState.medicion_confirmar_cedula, F.text == "2")
+async def medicion_confirmar_cedula_no(message: types.Message, state: FSMContext):
+    """Rechaza cédula y vuelve a preguntar"""
+    await message.answer("¿Cuál es su cédula?")
+    await state.set_state(RegistroState.medicion_cedula)
+
+@dp.message(RegistroState.medicion_confirmar_cedula)
+async def medicion_confirmar_cedula_invalido(message: types.Message, state: FSMContext):
+    await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
+
+# PASO 2: Selección de Silos
+@dp.message(RegistroState.medicion_seleccion_silos)
+async def medicion_get_silos(message: types.Message, state: FSMContext):
+    """Captura y valida selección de silos"""
+    seleccion = message.text.strip()
+
+    es_valido, silos, mensaje_error = validar_seleccion_silos(seleccion)
+
+    if not es_valido:
+        await message.answer(
+            f"⚠️ {mensaje_error}\n\n"
+            "*Ejemplos válidos:*\n"
+            "• `1`\n"
+            "• `2,4`\n"
+            "• `1,3,5`",
+            parse_mode="Markdown"
+        )
+        return
+
+    silos_texto = ', '.join(map(str, silos))
+    await state.update_data(medicion_silos_seleccionados=silos)
+
+    await message.answer(
+        f"📦 Silos seleccionados: *{silos_texto}*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.medicion_confirmar_silos)
+
+@dp.message(RegistroState.medicion_confirmar_silos, F.text == "1")
+async def medicion_confirmar_silos_si(message: types.Message, state: FSMContext):
+    """Confirma silos e inicia proceso del primer silo"""
+    data = await state.get_data()
+    silos = data.get('medicion_silos_seleccionados', [])
+
+    # Inicializar lista de silos pendientes
+    await state.update_data(
+        medicion_silos_pendientes=silos.copy(),
+        medicion_indice_silo_actual=0
+    )
+
+    # Iniciar con el primer silo
+    silo_actual = silos[0]
+    await state.update_data(medicion_silo_en_proceso=silo_actual)
+
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="Levante")
+    builder.button(text="Engorde")
+    builder.button(text="Finalizador")
+    builder.adjust(2)
+
+    await message.answer(
+        f"¿Qué tipo de comida va en el Silo {silo_actual}?",
+        reply_markup=builder.as_markup(resize_keyboard=True)
+    )
+    await state.set_state(RegistroState.medicion_tipo_comida)
+
+@dp.message(RegistroState.medicion_confirmar_silos, F.text == "2")
+async def medicion_confirmar_silos_no(message: types.Message, state: FSMContext):
+    """Rechaza silos y vuelve a preguntar"""
+    await message.answer(
+        "📦 *Selección de Silos*\n\n"
+        "Por favor ingrese los números de silos:\n\n"
+        "*Ejemplos:* `1`, `2,4`, `1,3,5`",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.medicion_seleccion_silos)
+
+@dp.message(RegistroState.medicion_confirmar_silos)
+async def medicion_confirmar_silos_invalido(message: types.Message, state: FSMContext):
+    await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
+
+# PASO 3: Tipo de Comida para cada silo
+@dp.message(RegistroState.medicion_tipo_comida, F.text.in_(["Levante", "Engorde", "Finalizador"]))
+async def medicion_get_tipo_comida(message: types.Message, state: FSMContext):
+    """Captura tipo de comida"""
+    data = await state.get_data()
+    silo_actual = data.get('medicion_silo_en_proceso')
+    tipo_comida = message.text
+
+    await state.update_data(medicion_tipo_comida_temp=tipo_comida)
+
+    await message.answer(
+        f"🍽️ Silo {silo_actual}: *{tipo_comida}*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await state.set_state(RegistroState.medicion_confirmar_tipo_comida)
+
+@dp.message(RegistroState.medicion_tipo_comida)
+async def medicion_tipo_comida_invalido(message: types.Message, state: FSMContext):
+    await message.answer("⚠️ Por favor seleccione una opción válida usando los botones.")
+
+@dp.message(RegistroState.medicion_confirmar_tipo_comida, F.text == "1")
+async def medicion_confirmar_tipo_comida_si(message: types.Message, state: FSMContext):
+    """Confirma tipo de comida y pasa a peso ANTES"""
+    data = await state.get_data()
+    silo_actual = data.get('medicion_silo_en_proceso')
+
+    await message.answer(
+        f"⚖️ *PESO ANTES DE DESCARGA - Silo {silo_actual}*\n\n"
+        f"Por favor ingrese el peso actual del silo\n"
+        f"EN TONELADAS (puede usar decimales).\n\n"
+        f"*Ejemplos:* 5.5, 12.3, 8.0\n\n"
+        f"Peso en toneladas:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.medicion_peso_antes)
+
+@dp.message(RegistroState.medicion_confirmar_tipo_comida, F.text == "2")
+async def medicion_confirmar_tipo_comida_no(message: types.Message, state: FSMContext):
+    """Rechaza tipo de comida y vuelve a preguntar"""
+    data = await state.get_data()
+    silo_actual = data.get('medicion_silo_en_proceso')
+
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="Levante")
+    builder.button(text="Engorde")
+    builder.button(text="Finalizador")
+    builder.adjust(2)
+
+    await message.answer(
+        f"¿Qué tipo de comida va en el Silo {silo_actual}?",
+        reply_markup=builder.as_markup(resize_keyboard=True)
+    )
+    await state.set_state(RegistroState.medicion_tipo_comida)
+
+@dp.message(RegistroState.medicion_confirmar_tipo_comida)
+async def medicion_confirmar_tipo_comida_invalido(message: types.Message, state: FSMContext):
+    await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
+
+# PASO 4: Peso ANTES
+@dp.message(RegistroState.medicion_peso_antes)
+async def medicion_get_peso_antes(message: types.Message, state: FSMContext):
+    """Captura y valida peso antes"""
+    peso_texto = message.text.strip()
+
+    es_valido, peso, mensaje_error = validar_peso_toneladas(peso_texto)
+
+    if not es_valido:
+        await message.answer(f"⚠️ {mensaje_error}\n\nPor favor, intente nuevamente:")
+        return
+
+    data = await state.get_data()
+    silo_actual = data.get('medicion_silo_en_proceso')
+
+    await state.update_data(medicion_peso_antes_temp=peso)
+
+    await message.answer(
+        f"⚖️ Silo {silo_actual} - Peso ANTES:\n"
+        f"*{peso} toneladas*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.medicion_confirmar_peso_antes)
+
+@dp.message(RegistroState.medicion_confirmar_peso_antes, F.text == "1")
+async def medicion_confirmar_peso_antes_si(message: types.Message, state: FSMContext):
+    """Confirma peso antes y solicita foto"""
+    data = await state.get_data()
+    silo_actual = data.get('medicion_silo_en_proceso')
+
+    await message.answer(
+        f"📸 Por favor envíe una FOTO de la medición\n"
+        f"del Silo {silo_actual} ANTES de descargar."
+    )
+    await state.set_state(RegistroState.medicion_foto_antes)
+
+@dp.message(RegistroState.medicion_confirmar_peso_antes, F.text == "2")
+async def medicion_confirmar_peso_antes_no(message: types.Message, state: FSMContext):
+    """Rechaza peso antes y vuelve a preguntar"""
+    data = await state.get_data()
+    silo_actual = data.get('medicion_silo_en_proceso')
+
+    await message.answer(
+        f"⚖️ *PESO ANTES - Silo {silo_actual}*\n\n"
+        f"Peso en toneladas:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.medicion_peso_antes)
+
+@dp.message(RegistroState.medicion_confirmar_peso_antes)
+async def medicion_confirmar_peso_antes_invalido(message: types.Message, state: FSMContext):
+    await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
+
+# PASO 5: Foto ANTES
+@dp.message(RegistroState.medicion_foto_antes, F.photo)
+async def medicion_guardar_foto_antes(message: types.Message, state: FSMContext):
+    """Guarda foto ANTES y pasa a peso DESPUÉS"""
+    data = await state.get_data()
+    silo_actual = data.get('medicion_silo_en_proceso')
+
+    try:
+        photo = message.photo[-1]
+        file_info = await bot.get_file(photo.file_id)
+
+        # Crear carpeta para imágenes si no existe
+        images_folder = "imagenes_pesajes"
+        if not os.path.exists(images_folder):
+            os.makedirs(images_folder)
+
+        # Nombre único para la imagen
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        cedula = data.get('medicion_cedula', 'SIN_CEDULA')
+        file_name = f"medicion_silo{silo_actual}_antes_{cedula}_{timestamp}.jpg"
+        local_file_path = os.path.join(images_folder, file_name)
+
+        # Descargar la imagen
+        await bot.download_file(file_info.file_path, destination=local_file_path)
+
+        absolute_path = os.path.abspath(local_file_path)
+
+        # Intentar subir a Drive (si está configurado)
+        drive_link = None
+        if GOOGLE_CREDENTIALS_PATH and os.path.exists(GOOGLE_CREDENTIALS_PATH) and GOOGLE_FOLDER_ID:
+            drive_link = upload_to_drive(local_file_path, file_name)
+
+        # Si no se subió a Drive, usar ruta local
+        if not drive_link:
+            drive_link = absolute_path
+
+        # Guardar path de la foto
+        await state.update_data(medicion_foto_antes_temp=drive_link)
+
+        await message.answer(
+            f"✅ Foto ANTES guardada.\n\n"
+            f"⚖️ *PESO DESPUÉS DE DESCARGA - Silo {silo_actual}*\n\n"
+            f"Ya descargó la comida en el Silo {silo_actual}.\n"
+            f"Por favor ingrese el peso ACTUAL del silo\n"
+            f"EN TONELADAS.\n\n"
+            f"Peso en toneladas:",
+            parse_mode="Markdown"
+        )
+        await state.set_state(RegistroState.medicion_peso_despues)
+
+    except Exception as e:
+        print(f"❌ Error guardando foto ANTES: {e}")
+        await message.answer("❌ Error al guardar la foto. Por favor, intente nuevamente.")
+
+@dp.message(RegistroState.medicion_foto_antes)
+async def medicion_foto_antes_invalida(message: types.Message, state: FSMContext):
+    await message.answer("⚠️ Por favor envíe una FOTO (no texto).")
+
+# PASO 6: Peso DESPUÉS
+@dp.message(RegistroState.medicion_peso_despues)
+async def medicion_get_peso_despues(message: types.Message, state: FSMContext):
+    """Captura y valida peso después"""
+    peso_texto = message.text.strip()
+
+    es_valido, peso, mensaje_error = validar_peso_toneladas(peso_texto)
+
+    if not es_valido:
+        await message.answer(f"⚠️ {mensaje_error}\n\nPor favor, intente nuevamente:")
+        return
+
+    data = await state.get_data()
+    silo_actual = data.get('medicion_silo_en_proceso')
+    peso_antes = data.get('medicion_peso_antes_temp')
+
+    await state.update_data(medicion_peso_despues_temp=peso)
+
+    # Validar que peso_despues > peso_antes
+    if peso <= peso_antes:
+        diferencia = peso_antes - peso
+        await message.answer(
+            "⚠️ *ADVERTENCIA*\n\n"
+            f"Peso ANTES: {peso_antes} toneladas\n"
+            f"Peso DESPUÉS: {peso} toneladas\n\n"
+            f"El peso después es MENOR o IGUAL al peso antes.\n"
+            f"Esto es inusual. ¿Está seguro?\n\n"
+            "1️⃣ Sí, es correcto (continuar)\n"
+            "2️⃣ No, corregir peso\n\n"
+            "Escriba el número de la opción:",
+            parse_mode="Markdown"
+        )
+    else:
+        diferencia = peso - peso_antes
+        await message.answer(
+            f"⚖️ Silo {silo_actual} - Peso DESPUÉS:\n"
+            f"*{peso} toneladas*\n\n"
+            f"📊 Aumento: *{diferencia:.2f} toneladas*\n\n"
+            "¿Es correcto?\n\n"
+            "1️⃣ Sí, confirmar\n"
+            "2️⃣ No, editar\n\n"
+            "Escriba el número de la opción:",
+            parse_mode="Markdown"
+        )
+
+    await state.set_state(RegistroState.medicion_confirmar_peso_despues)
+
+@dp.message(RegistroState.medicion_confirmar_peso_despues, F.text == "1")
+async def medicion_confirmar_peso_despues_si(message: types.Message, state: FSMContext):
+    """Confirma peso después y solicita foto"""
+    data = await state.get_data()
+    silo_actual = data.get('medicion_silo_en_proceso')
+
+    await message.answer(
+        f"📸 Por favor envíe una FOTO de la medición\n"
+        f"del Silo {silo_actual} DESPUÉS de descargar."
+    )
+    await state.set_state(RegistroState.medicion_foto_despues)
+
+@dp.message(RegistroState.medicion_confirmar_peso_despues, F.text == "2")
+async def medicion_confirmar_peso_despues_no(message: types.Message, state: FSMContext):
+    """Rechaza peso después y vuelve a preguntar"""
+    data = await state.get_data()
+    silo_actual = data.get('medicion_silo_en_proceso')
+
+    await message.answer(
+        f"⚖️ *PESO DESPUÉS - Silo {silo_actual}*\n\n"
+        f"Peso en toneladas:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(RegistroState.medicion_peso_despues)
+
+@dp.message(RegistroState.medicion_confirmar_peso_despues)
+async def medicion_confirmar_peso_despues_invalido(message: types.Message, state: FSMContext):
+    await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
+
+# PASO 7: Foto DESPUÉS
+@dp.message(RegistroState.medicion_foto_despues, F.photo)
+async def medicion_guardar_foto_despues(message: types.Message, state: FSMContext):
+    """Guarda foto DESPUÉS y procesa siguiente silo o finaliza"""
+    data = await state.get_data()
+    silo_actual = data.get('medicion_silo_en_proceso')
+
+    try:
+        photo = message.photo[-1]
+        file_info = await bot.get_file(photo.file_id)
+
+        images_folder = "imagenes_pesajes"
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        cedula = data.get('medicion_cedula', 'SIN_CEDULA')
+        file_name = f"medicion_silo{silo_actual}_despues_{cedula}_{timestamp}.jpg"
+        local_file_path = os.path.join(images_folder, file_name)
+
+        await bot.download_file(file_info.file_path, destination=local_file_path)
+        absolute_path = os.path.abspath(local_file_path)
+
+        drive_link = None
+        if GOOGLE_CREDENTIALS_PATH and os.path.exists(GOOGLE_CREDENTIALS_PATH) and GOOGLE_FOLDER_ID:
+            drive_link = upload_to_drive(local_file_path, file_name)
+
+        if not drive_link:
+            drive_link = absolute_path
+
+        # Guardar datos completos del silo procesado
+        silo_data = {
+            'numero': silo_actual,
+            'tipo_comida': data.get('medicion_tipo_comida_temp'),
+            'peso_antes': data.get('medicion_peso_antes_temp'),
+            'peso_despues': data.get('medicion_peso_despues_temp'),
+            'diferencia': data.get('medicion_peso_despues_temp') - data.get('medicion_peso_antes_temp'),
+            'foto_antes': data.get('medicion_foto_antes_temp'),
+            'foto_despues': drive_link
+        }
+
+        silos_procesados = data.get('medicion_silos_procesados', [])
+        silos_procesados.append(silo_data)
+        await state.update_data(medicion_silos_procesados=silos_procesados)
+
+        # Verificar si hay más silos pendientes
+        silos_seleccionados = data.get('medicion_silos_seleccionados', [])
+        indice = data.get('medicion_indice_silo_actual', 0)
+
+        if indice + 1 < len(silos_seleccionados):
+            # Hay más silos, procesar el siguiente
+            siguiente_silo = silos_seleccionados[indice + 1]
+            await state.update_data(
+                medicion_silo_en_proceso=siguiente_silo,
+                medicion_indice_silo_actual=indice + 1
+            )
+
+            builder = ReplyKeyboardBuilder()
+            builder.button(text="Levante")
+            builder.button(text="Engorde")
+            builder.button(text="Finalizador")
+            builder.adjust(2)
+
+            await message.answer(
+                f"✅ Silo {silo_actual} completado.\n\n"
+                f"¿Qué tipo de comida va en el Silo {siguiente_silo}?",
+                reply_markup=builder.as_markup(resize_keyboard=True)
+            )
+            await state.set_state(RegistroState.medicion_tipo_comida)
+        else:
+            # No hay más silos, mostrar resumen y preguntar si quiere agregar más
+            total_descargado = sum(s['diferencia'] for s in silos_procesados)
+
+            resumen = "✅ Todos los silos completados.\n\n"
+            resumen += "📊 *Resumen hasta ahora:*\n\n"
+            for s in silos_procesados:
+                resumen += f"✅ Silo {s['numero']}: {s['peso_antes']} ton → {s['peso_despues']} ton (+{s['diferencia']:.2f} ton)\n"
+
+            resumen += f"\n¿Desea registrar otro silo?"
+
+            await message.answer(resumen, parse_mode="Markdown")
+
+            builder = ReplyKeyboardBuilder()
+            builder.button(text="✅ Sí, otro silo")
+            builder.button(text="❌ No, finalizar")
+            builder.adjust(2)
+
+            await message.answer(
+                "Seleccione una opción:",
+                reply_markup=builder.as_markup(resize_keyboard=True)
+            )
+            await state.set_state(RegistroState.medicion_agregar_mas)
+
+    except Exception as e:
+        print(f"❌ Error guardando foto DESPUÉS: {e}")
+        await message.answer("❌ Error al guardar la foto. Por favor, intente nuevamente.")
+
+@dp.message(RegistroState.medicion_foto_despues)
+async def medicion_foto_despues_invalida(message: types.Message, state: FSMContext):
+    await message.answer("⚠️ Por favor envíe una FOTO (no texto).")
+
+# PASO 8: Agregar más silos o finalizar
+@dp.message(RegistroState.medicion_agregar_mas, F.text.in_(["✅ Sí, otro silo", "Sí", "Si", "1"]))
+async def medicion_agregar_otro_silo(message: types.Message, state: FSMContext):
+    """Usuario quiere agregar más silos"""
+    await message.answer(
+        "📦 *Selección de Silos Adicionales*\n\n"
+        "Ingrese los números de silos adicionales:\n\n"
+        "*Ejemplos:* `1`, `2,4`, `1,3,5`",
+        parse_mode="Markdown",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await state.set_state(RegistroState.medicion_seleccion_silos)
+
+@dp.message(RegistroState.medicion_agregar_mas, F.text.in_(["❌ No, finalizar", "No", "2"]))
+async def medicion_finalizar_registro(message: types.Message, state: FSMContext):
+    """Usuario finaliza el registro - Guardar en BD y notificar"""
+    await message.answer("⏳ Guardando registros...", reply_markup=types.ReplyKeyboardRemove())
+
+    data = await state.get_data()
+    cedula = data.get('medicion_cedula')
+    silos_procesados = data.get('medicion_silos_procesados', [])
+    session_id = data.get('medicion_session_id')
+
+    if not silos_procesados:
+        await message.answer("⚠️ No hay silos registrados para guardar.")
+        await volver_menu_sitio3(message, state)
+        return
+
+    # Guardar en base de datos
+    conn = None
+    try:
+        conn = await get_db_connection()
+        if conn:
+            fecha_registro = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            telegram_user_id = message.from_user.id
+
+            # Insertar cada silo como una fila separada
+            for silo in silos_procesados:
+                await conn.execute('''
+                    INSERT INTO operario_sitio3_medicion_silos
+                    (cedula_operario, numero_silo, tipo_comida, peso_antes, peso_despues, diferencia,
+                     foto_antes, foto_despues, fecha_registro, session_id, telegram_user_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                ''', cedula, silo['numero'], silo['tipo_comida'], silo['peso_antes'],
+                    silo['peso_despues'], silo['diferencia'], silo['foto_antes'],
+                    silo['foto_despues'], fecha_registro, session_id, telegram_user_id)
+
+            print(f"✅ {len(silos_procesados)} silos guardados en BD (session: {session_id})")
+        else:
+            print("⚠️ No se pudo obtener conexión a la base de datos")
+
+    except Exception as e:
+        print(f"❌ Error guardando en base de datos: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        if conn:
+            await release_db_connection(conn)
+
+    # Calcular total descargado
+    total_descargado = sum(s['diferencia'] for s in silos_procesados)
+
+    # Enviar notificación al grupo con resumen
+    if GROUP_CHAT_ID:
+        try:
+            fecha_formateada = datetime.now().strftime('%d/%m/%Y %H:%M')
+
+            mensaje_grupo = (
+                "📦 *NUEVA MEDICIÓN DE SILOS - SITIO 3*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"👤 Operario: `{cedula}`\n"
+                f"🕒 Fecha: {fecha_formateada}\n\n"
+                "📊 *RESUMEN DE SILOS:*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            )
+
+            for silo in silos_procesados:
+                mensaje_grupo += (
+                    f"🔹 *SILO {silo['numero']} - {silo['tipo_comida']}*\n"
+                    f"   Antes: {silo['peso_antes']} ton\n"
+                    f"   Después: {silo['peso_despues']} ton\n"
+                    f"   ➕ Aumento: {silo['diferencia']:.2f} ton\n\n"
+                )
+
+            mensaje_grupo += (
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🏋️ *TOTAL DESCARGADO: {total_descargado:.2f} toneladas*"
+            )
+
+            await bot.send_message(GROUP_CHAT_ID, mensaje_grupo, parse_mode="Markdown")
+
+            # Enviar todas las fotos
+            for silo in silos_procesados:
+                try:
+                    # Foto ANTES
+                    if silo['foto_antes'] and os.path.exists(silo['foto_antes']):
+                        with open(silo['foto_antes'], 'rb') as photo:
+                            await bot.send_photo(
+                                chat_id=GROUP_CHAT_ID,
+                                photo=types.BufferedInputFile(photo.read(), filename=f"silo{silo['numero']}_antes.jpg"),
+                                caption=f"📸 Silo {silo['numero']} - ANTES ({silo['peso_antes']} ton)"
+                            )
+
+                    # Foto DESPUÉS
+                    if silo['foto_despues'] and os.path.exists(silo['foto_despues']):
+                        with open(silo['foto_despues'], 'rb') as photo:
+                            await bot.send_photo(
+                                chat_id=GROUP_CHAT_ID,
+                                photo=types.BufferedInputFile(photo.read(), filename=f"silo{silo['numero']}_despues.jpg"),
+                                caption=f"📸 Silo {silo['numero']} - DESPUÉS ({silo['peso_despues']} ton) +{silo['diferencia']:.2f} ton"
+                            )
+                except Exception as e_foto:
+                    print(f"⚠️ Error enviando foto del Silo {silo['numero']}: {e_foto}")
+
+            print("✅ Notificación y fotos enviadas al grupo")
+
+        except Exception as e:
+            print(f"⚠️ Error al enviar notificación al grupo: {e}")
+
+    # Mostrar resumen al usuario
+    resumen_usuario = (
+        "✅ *Medición de silos registrada exitosamente*\n\n"
+        "📊 *Resumen:*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"• Silos procesados: {len(silos_procesados)}\n"
+        f"• Total descargado: *{total_descargado:.2f} ton*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Las fotos y datos se han enviado al grupo."
+    )
+
+    await message.answer(resumen_usuario, parse_mode="Markdown")
+
+    # Volver al menú principal
+    await asyncio.sleep(1)
+    await volver_menu_principal(message, state)
+
+@dp.message(RegistroState.medicion_agregar_mas)
+async def medicion_agregar_mas_invalido(message: types.Message, state: FSMContext):
+    await message.answer("⚠️ Por favor seleccione una opción válida usando los botones.")
+
+# ==================== FIN MEDICIÓN DE SILOS ==================== #
 
 # ==================== FIN OPERARIO SITIO 3 ==================== #
 
