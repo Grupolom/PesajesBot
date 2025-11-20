@@ -1938,42 +1938,40 @@ async def enviar_notificacion_grupo_conductor(data: dict):
     if not GROUP_CHAT_ID:
         print("⚠️ GROUP_CHAT_ID no configurado. No se enviará notificación.")
         return
-    
+
     try:
         # Crear mensaje
         mensaje_lineas = ["🚛 *NUEVO REGISTRO DE CONDUCTOR*\n"]
-        
+
         timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
         mensaje_lineas.append(f"📅 Fecha: {timestamp}\n")
-        
+
         mensaje_lineas.append(f"👤 Cédula: *{data.get('cedula')}*")
         mensaje_lineas.append(f"🚛 Placa: *{data.get('placa')}*")
         mensaje_lineas.append(f"📦 Tipo de carga: *{data.get('tipo_carga')}*\n")
-        
+
         tipo_carga = data.get('tipo_carga')
-        
+
         # Detalles según tipo de carga
         if tipo_carga in ["Lechones", "Cerdos Gordos"]:
             mensaje_lineas.append(f"🐷 Cantidad de animales: *{data.get('num_animales')}*")
-            
+
         elif tipo_carga == "Combustible":
             mensaje_lineas.append(f"⛽ Tipo de combustible: *{data.get('tipo_combustible')}*")
             mensaje_lineas.append(f"📊 Cantidad: *{data.get('cantidad_galones'):,.2f} galones*")
-            
+
         elif tipo_carga == "Concentrado":
             mensaje_lineas.append("📋 *DATOS DE FACTURA:*")
             mensaje_lineas.append(f"   • Número de factura: {data.get('numero_factura')}")
             mensaje_lineas.append(f"   • Tipo de alimento: {data.get('tipo_alimento')}")
             mensaje_lineas.append(f"   • Kilos comprados: {data.get('kilos_comprados'):,.2f} kg")
-            if data.get('factura_foto'):
-                mensaje_lineas.append(f"   • [Ver foto de factura]({data.get('factura_foto')})")
-        
+
         mensaje_lineas.append(f"\n🏢 Báscula: *{data.get('bascula')}*")
-        
+
         # Información especial de Bogotá
         if data.get('bascula') == "Bogotá":
             mensaje_lineas.append(f"✅ Cerdos vivos: *{data.get('cerdos_vivos', 0)}*")
-            
+
             cerdos_muertos = data.get('cerdos_muertos', 0)
             if cerdos_muertos > 0:
                 # ALERTA ESPECIAL EN MAYÚSCULAS CON EMOJIS
@@ -1981,23 +1979,52 @@ async def enviar_notificacion_grupo_conductor(data: dict):
                 mensaje_lineas.append(f"🚨 *¡¡¡ALERTA CRÍTICA!!!* 🚨")
                 mensaje_lineas.append(f"⚠️ *SE MURIERON {cerdos_muertos} CERDOS* ⚠️")
                 mensaje_lineas.append("🔴" * 15 + "\n")
-        
+
         mensaje_lineas.append(f"⚖️ Peso registrado: *{data.get('peso'):,.2f} kg*")
-        
-        if data.get('foto_pesaje'):
-            mensaje_lineas.append(f"\n📸 [Ver foto del pesaje]({data.get('foto_pesaje')})")
-        
+
         mensaje = "\n".join(mensaje_lineas)
-        
-        # Enviar mensaje
+
+        # Enviar mensaje de texto
         await bot.send_message(
             chat_id=GROUP_CHAT_ID,
             text=mensaje,
             parse_mode="Markdown"
         )
-        
-        print("✅ Notificación enviada al grupo")
-        
+
+        # Enviar foto de FACTURA como archivo adjunto (si existe)
+        if tipo_carga == "Concentrado" and data.get('factura_foto'):
+            factura_path = data.get('factura_foto')
+            # Si es un path local (no URL de Drive)
+            if factura_path and not factura_path.startswith('http') and os.path.exists(factura_path):
+                try:
+                    with open(factura_path, 'rb') as photo:
+                        await bot.send_photo(
+                            chat_id=GROUP_CHAT_ID,
+                            photo=types.BufferedInputFile(photo.read(), filename="factura.jpg"),
+                            caption=f"📸 Foto de Factura - {data.get('numero_factura')}"
+                        )
+                    print("✅ Foto de factura enviada al grupo")
+                except Exception as e_factura:
+                    print(f"⚠️ Error enviando foto de factura: {e_factura}")
+
+        # Enviar foto de PESAJE como archivo adjunto (si existe)
+        if data.get('foto_pesaje'):
+            pesaje_path = data.get('foto_pesaje')
+            # Si es un path local (no URL de Drive)
+            if pesaje_path and not pesaje_path.startswith('http') and os.path.exists(pesaje_path):
+                try:
+                    with open(pesaje_path, 'rb') as photo:
+                        await bot.send_photo(
+                            chat_id=GROUP_CHAT_ID,
+                            photo=types.BufferedInputFile(photo.read(), filename="pesaje.jpg"),
+                            caption=f"📸 Foto de Pesaje - {data.get('placa')} - {data.get('peso'):,.2f} kg"
+                        )
+                    print("✅ Foto de pesaje enviada al grupo")
+                except Exception as e_pesaje:
+                    print(f"⚠️ Error enviando foto de pesaje: {e_pesaje}")
+
+        print("✅ Notificación completa enviada al grupo")
+
     except Exception as e:
         print(f"⚠️ Error enviando notificación al grupo: {e}")
 
@@ -2186,25 +2213,32 @@ async def procesar_foto_lechon(message: types.Message, state: FSMContext):
     cantidad_lechones = data.get("cantidad_lechones")
     pesos = data.get("pesos", [])
     fotos = data.get("fotos", [])
-    
+    fotos_locales = data.get("fotos_locales", [])  # Nuevo: guardar paths locales
+
     # Descargar foto
     photo = message.photo[-1]
     file = await bot.get_file(photo.file_id)
-    file_path = f"temp_lechon_{lechon_actual}_{message.from_user.id}.jpg"
+
+    # Guardar en carpeta imagenes_pesajes (NO temporal)
+    os.makedirs("imagenes_pesajes", exist_ok=True)
+    cedula = data.get("cedula")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"sitio1_lechon{lechon_actual}_{cedula}_{timestamp}.jpg"
+    file_path = os.path.join("imagenes_pesajes", filename)
+
     await bot.download_file(file.file_path, file_path)
-    
+
     # Subir a Google Drive
-    foto_url = upload_to_drive(file_path, f"lechon_{lechon_actual}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg")
-    
-    # Eliminar archivo temporal
-    if os.path.exists(file_path):
-        os.remove(file_path)
-    
-    # Guardar peso y foto
+    foto_url = upload_to_drive(file_path, filename)
+
+    # NO eliminar archivo local (mantenerlo para enviar al grupo)
+
+    # Guardar peso, foto URL y path local
     pesos.append(peso)
-    fotos.append(foto_url if foto_url else "Sin foto")
-    
-    await state.update_data(pesos=pesos, fotos=fotos)
+    fotos.append(foto_url if foto_url else file_path)  # Fallback a path local
+    fotos_locales.append(file_path)  # Siempre guardar path local
+
+    await state.update_data(pesos=pesos, fotos=fotos, fotos_locales=fotos_locales)
     
     # Verificar si hay más lechones
     if lechon_actual < cantidad_lechones:
@@ -2330,38 +2364,50 @@ async def enviar_notificacion_grupo_sitio1(data: dict, peso_total: float, peso_p
     if not GROUP_CHAT_ID:
         print("⚠️ GROUP_CHAT_ID no configurado. No se enviará notificación.")
         return
-    
+
     try:
         pesos = data.get("pesos", [])
-        fotos = data.get("fotos", [])
-        
+        fotos_locales = data.get("fotos_locales", [])
+
         # Crear mensaje
         mensaje = "🐷 *NUEVO REGISTRO - OPERARIO SITIO 1*\n\n"
-        
+
         timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
         mensaje += f"📅 Fecha: {timestamp}\n\n"
-        
+
         mensaje += f"👤 Cédula: *{data.get('cedula')}*\n"
         mensaje += f"🐷 Cantidad de lechones: *{data.get('cantidad_lechones')}*\n"
         mensaje += f"⚖️ Peso total: *{peso_total:,.2f} kg*\n"
         mensaje += f"📊 Peso promedio: *{peso_promedio:,.2f} kg/lechón*\n\n"
-        
+
         mensaje += "*DETALLE POR LECHÓN:*\n"
         for i, peso in enumerate(pesos, 1):
-            mensaje += f"Lechón #{i}: {peso:,.2f} kg"
-            if i < len(fotos) and fotos[i-1] and fotos[i-1] != "Sin foto":
-                mensaje += f" - [Ver foto]({fotos[i-1]})"
-            mensaje += "\n"
-        
-        # Enviar mensaje
+            mensaje += f"Lechón #{i}: {peso:,.2f} kg\n"
+
+        # Enviar mensaje de texto
         await bot.send_message(
             chat_id=GROUP_CHAT_ID,
             text=mensaje,
             parse_mode="Markdown"
         )
-        
-        print("✅ Notificación de Sitio 1 enviada al grupo")
-        
+
+        # Enviar TODAS las fotos como archivos adjuntos
+        if fotos_locales:
+            for i, foto_path in enumerate(fotos_locales, 1):
+                if foto_path and os.path.exists(foto_path):
+                    try:
+                        with open(foto_path, 'rb') as photo:
+                            await bot.send_photo(
+                                chat_id=GROUP_CHAT_ID,
+                                photo=types.BufferedInputFile(photo.read(), filename=f"lechon_{i}.jpg"),
+                                caption=f"📸 Lechón #{i} - {pesos[i-1]:,.2f} kg"
+                            )
+                        print(f"✅ Foto del lechón #{i} enviada al grupo")
+                    except Exception as e_foto:
+                        print(f"⚠️ Error enviando foto del lechón #{i}: {e_foto}")
+
+        print("✅ Notificación completa de Sitio 1 enviada al grupo")
+
     except Exception as e:
         print(f"⚠️ Error enviando notificación al grupo: {e}")
 
