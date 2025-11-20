@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardBuilder
 from aiogram.types import ReplyKeyboardRemove
 from dotenv import load_dotenv
@@ -671,13 +671,15 @@ async def volver_menu_principal(message: types.Message, state: FSMContext):
     """Función helper para volver al menú principal multi-perfil"""
     await state.clear()
     await message.answer(
-        "👋 *Bienvenido al Sistema de Gestión*\n\n"
+        "👋 *Bienvenido al Sistema de Gestión de Lomarosa*\n\n"
         "Seleccione su perfil:\n\n"
         "1️⃣ Operario Sitio 3\n"
         "2️⃣ Operario Sitio 1\n"
         "3️⃣ Conductores\n\n"
         "Escriba el número de la opción:\n\n"
-        "💡 _Escriba 0 en cualquier momento para cancelar_",
+        "💡 _Escriba 0 en cualquier momento para cancelar_\n\n"
+        "🐷 *LOMAROSA* 🐷\n"
+        "_Campo bien hecho, cerdos bien criados_",
         parse_mode="Markdown"
     )
     await state.set_state(RegistroState.menu_principal)
@@ -705,7 +707,9 @@ async def finalizar_flujo(message: types.Message, state: FSMContext):
         "En caso de volver a querer usar el bot, escriba:\n"
         "/start\n\n"
         "Si no, ¡hasta luego!\n\n"
-        "🙏 *MUCHAS GRACIAS*",
+        "🙏 *MUCHAS GRACIAS*\n\n"
+        "🐷 *LOMAROSA* 🐷\n"
+        "_Campo bien hecho, cerdos bien criados_",
         parse_mode="Markdown",
         reply_markup=ReplyKeyboardRemove()
     )
@@ -898,16 +902,288 @@ async def start(message: types.Message, state: FSMContext):
     """Handler inicial - Muestra menú principal multi-perfil"""
     await state.clear()
     await message.answer(
-        "👋 *Bienvenido al Sistema de Gestión*\n\n"
+        "👋 *Bienvenido al Sistema de Gestión de Lomarosa*\n\n"
         "Seleccione su perfil:\n\n"
         "1️⃣ Operario Sitio 3\n"
         "2️⃣ Operario Sitio 1\n"
         "3️⃣ Conductores\n\n"
         "Escriba el número de la opción:\n\n"
-        "💡 _Escriba 0 en cualquier momento para cancelar_",
+        "💡 _Escriba 0 en cualquier momento para cancelar_\n\n"
+        "🐷 *LOMAROSA* 🐷\n"
+        "_Campo bien hecho, cerdos bien criados_",
         parse_mode="Markdown"
     )
     await state.set_state(RegistroState.menu_principal)
+
+# ==================== COMANDOS DE REPORTES/CONSULTAS ==================== #
+
+@dp.message(Command("reporte_hoy"))
+async def reporte_hoy(message: types.Message):
+    """Muestra todos los registros del día actual"""
+    conn = None
+    try:
+        conn = await get_db_connection()
+        if not conn:
+            await message.answer("⚠️ Error de conexión a la base de datos.")
+            return
+
+        fecha_hoy = datetime.now().strftime('%Y-%m-%d')
+
+        # Consultar todas las tablas
+        sitio3_animales = await conn.fetch(
+            "SELECT cedula_operario, bandas, rango_corrales, tipo_comida, fecha_registro FROM operario_sitio3_animales WHERE DATE(fecha_registro) = $1 ORDER BY fecha_registro DESC",
+            fecha_hoy
+        )
+
+        sitio1 = await conn.fetch(
+            "SELECT cedula, cantidad_lechones, lechones_por_grupo, peso_total, peso_promedio, fecha FROM operario_fijo_granja WHERE DATE(fecha) = $1 ORDER BY fecha DESC",
+            fecha_hoy
+        )
+
+        conductores = await conn.fetch(
+            "SELECT cedula, placa, tipo_carga, bascula, peso, fecha FROM conductores WHERE DATE(fecha) = $1 ORDER BY fecha DESC",
+            fecha_hoy
+        )
+
+        # Construir mensaje
+        mensaje = f"📊 *REPORTE DEL DÍA {datetime.now().strftime('%d/%m/%Y')}*\n\n"
+
+        if sitio3_animales:
+            mensaje += f"🐷 *SITIO 3 - ANIMALES* ({len(sitio3_animales)} registros)\n"
+            for reg in sitio3_animales[:5]:  # Máximo 5
+                mensaje += f"• Cédula: {reg['cedula_operario']} | Banda: {reg['bandas']} | Corrales: {reg['rango_corrales']}\n"
+            if len(sitio3_animales) > 5:
+                mensaje += f"_... y {len(sitio3_animales) - 5} más_\n"
+            mensaje += "\n"
+
+        if sitio1:
+            mensaje += f"🐷 *SITIO 1 - LECHONES* ({len(sitio1)} registros)\n"
+            for reg in sitio1[:5]:
+                mensaje += f"• Cédula: {reg['cedula']} | Lechones: {reg['cantidad_lechones']} | Peso: {reg['peso_total']:.2f} kg\n"
+            if len(sitio1) > 5:
+                mensaje += f"_... y {len(sitio1) - 5} más_\n"
+            mensaje += "\n"
+
+        if conductores:
+            mensaje += f"🚛 *CONDUCTORES* ({len(conductores)} registros)\n"
+            for reg in conductores[:5]:
+                mensaje += f"• Cédula: {reg['cedula']} | Placa: {reg['placa']} | Carga: {reg['tipo_carga']}\n"
+            if len(conductores) > 5:
+                mensaje += f"_... y {len(conductores) - 5} más_\n"
+            mensaje += "\n"
+
+        if not sitio3_animales and not sitio1 and not conductores:
+            mensaje += "No hay registros para el día de hoy."
+
+        mensaje += f"\n🐷 *LOMAROSA* 🐷\n_Campo bien hecho, cerdos bien criados_"
+
+        await message.answer(mensaje, parse_mode="Markdown")
+
+    except Exception as e:
+        await message.answer(f"⚠️ Error al generar reporte: {e}")
+        print(f"Error en reporte_hoy: {e}")
+    finally:
+        if conn:
+            await release_db_connection(conn)
+
+@dp.message(Command("reporte_cedula"))
+async def reporte_cedula(message: types.Message):
+    """Muestra registros de una cédula específica: /reporte_cedula 1234567890"""
+    try:
+        # Extraer la cédula del comando
+        args = message.text.split()
+        if len(args) < 2:
+            await message.answer(
+                "⚠️ *Uso correcto:*\n"
+                "`/reporte_cedula 1234567890`\n\n"
+                "Ejemplo: `/reporte_cedula 12345678`",
+                parse_mode="Markdown"
+            )
+            return
+
+        cedula = args[1].strip()
+
+        conn = None
+        conn = await get_db_connection()
+        if not conn:
+            await message.answer("⚠️ Error de conexión a la base de datos.")
+            return
+
+        # Consultar todas las tablas
+        sitio3_animales = await conn.fetch(
+            "SELECT bandas, rango_corrales, tipo_comida, fecha_registro FROM operario_sitio3_animales WHERE cedula_operario = $1 ORDER BY fecha_registro DESC LIMIT 10",
+            cedula
+        )
+
+        sitio1 = await conn.fetch(
+            "SELECT cantidad_lechones, lechones_por_grupo, peso_total, peso_promedio, fecha FROM operario_fijo_granja WHERE cedula = $1 ORDER BY fecha DESC LIMIT 10",
+            cedula
+        )
+
+        conductores = await conn.fetch(
+            "SELECT placa, tipo_carga, bascula, peso, fecha FROM conductores WHERE cedula = $1 ORDER BY fecha DESC LIMIT 10",
+            cedula
+        )
+
+        # Construir mensaje
+        mensaje = f"📋 *REPORTE - CÉDULA {cedula}*\n\n"
+
+        if sitio3_animales:
+            mensaje += f"🐷 *SITIO 3 - ANIMALES* (últimos {len(sitio3_animales)})\n"
+            for reg in sitio3_animales:
+                fecha = reg['fecha_registro'].strftime('%d/%m %H:%M')
+                mensaje += f"• {fecha} | Banda: {reg['bandas']} | Corrales: {reg['rango_corrales']}\n"
+            mensaje += "\n"
+
+        if sitio1:
+            mensaje += f"🐷 *SITIO 1 - LECHONES* (últimos {len(sitio1)})\n"
+            for reg in sitio1:
+                fecha = reg['fecha'].strftime('%d/%m %H:%M')
+                mensaje += f"• {fecha} | {reg['cantidad_lechones']} lechones | {reg['peso_total']:.2f} kg\n"
+            mensaje += "\n"
+
+        if conductores:
+            mensaje += f"🚛 *CONDUCTORES* (últimos {len(conductores)})\n"
+            for reg in conductores:
+                fecha = reg['fecha'].strftime('%d/%m %H:%M')
+                mensaje += f"• {fecha} | {reg['placa']} | {reg['tipo_carga']}\n"
+            mensaje += "\n"
+
+        if not sitio3_animales and not sitio1 and not conductores:
+            mensaje += f"No se encontraron registros para la cédula {cedula}."
+
+        mensaje += f"\n🐷 *LOMAROSA* 🐷\n_Campo bien hecho, cerdos bien criados_"
+
+        await message.answer(mensaje, parse_mode="Markdown")
+
+    except Exception as e:
+        await message.answer(f"⚠️ Error al generar reporte: {e}")
+        print(f"Error en reporte_cedula: {e}")
+    finally:
+        if conn:
+            await release_db_connection(conn)
+
+@dp.message(Command("reporte_sitio3"))
+async def reporte_sitio3(message: types.Message):
+    """Muestra últimos 10 registros de Sitio 3"""
+    conn = None
+    try:
+        conn = await get_db_connection()
+        if not conn:
+            await message.answer("⚠️ Error de conexión a la base de datos.")
+            return
+
+        registros = await conn.fetch(
+            "SELECT cedula_operario, bandas, rango_corrales, tipo_comida, fecha_registro FROM operario_sitio3_animales ORDER BY fecha_registro DESC LIMIT 10"
+        )
+
+        mensaje = "📊 *REPORTE SITIO 3 - ÚLTIMOS 10 REGISTROS*\n\n"
+
+        if registros:
+            for i, reg in enumerate(registros, 1):
+                fecha = reg['fecha_registro'].strftime('%d/%m %H:%M')
+                mensaje += (
+                    f"{i}. {fecha}\n"
+                    f"   • Cédula: {reg['cedula_operario']}\n"
+                    f"   • Banda: {reg['bandas']}\n"
+                    f"   • Corrales: {reg['rango_corrales']}\n"
+                    f"   • Comida: {reg['tipo_comida']}\n\n"
+                )
+        else:
+            mensaje += "No hay registros en Sitio 3."
+
+        mensaje += f"\n🐷 *LOMAROSA* 🐷\n_Campo bien hecho, cerdos bien criados_"
+
+        await message.answer(mensaje, parse_mode="Markdown")
+
+    except Exception as e:
+        await message.answer(f"⚠️ Error al generar reporte: {e}")
+        print(f"Error en reporte_sitio3: {e}")
+    finally:
+        if conn:
+            await release_db_connection(conn)
+
+@dp.message(Command("reporte_sitio1"))
+async def reporte_sitio1(message: types.Message):
+    """Muestra últimos 10 registros de Sitio 1"""
+    conn = None
+    try:
+        conn = await get_db_connection()
+        if not conn:
+            await message.answer("⚠️ Error de conexión a la base de datos.")
+            return
+
+        registros = await conn.fetch(
+            "SELECT cedula, cantidad_lechones, lechones_por_grupo, peso_total, peso_promedio, fecha FROM operario_fijo_granja ORDER BY fecha DESC LIMIT 10"
+        )
+
+        mensaje = "📊 *REPORTE SITIO 1 - ÚLTIMOS 10 REGISTROS*\n\n"
+
+        if registros:
+            for i, reg in enumerate(registros, 1):
+                fecha = reg['fecha'].strftime('%d/%m %H:%M')
+                mensaje += (
+                    f"{i}. {fecha}\n"
+                    f"   • Cédula: {reg['cedula']}\n"
+                    f"   • Lechones: {reg['cantidad_lechones']}\n"
+                    f"   • Agrupación: {reg['lechones_por_grupo'] or 'N/A'}\n"
+                    f"   • Peso total: {reg['peso_total']:.2f} kg\n"
+                    f"   • Promedio: {reg['peso_promedio']:.2f} kg\n\n"
+                )
+        else:
+            mensaje += "No hay registros en Sitio 1."
+
+        mensaje += f"\n🐷 *LOMAROSA* 🐷\n_Campo bien hecho, cerdos bien criados_"
+
+        await message.answer(mensaje, parse_mode="Markdown")
+
+    except Exception as e:
+        await message.answer(f"⚠️ Error al generar reporte: {e}")
+        print(f"Error en reporte_sitio1: {e}")
+    finally:
+        if conn:
+            await release_db_connection(conn)
+
+@dp.message(Command("reporte_conductores"))
+async def reporte_conductores(message: types.Message):
+    """Muestra últimos 10 registros de Conductores"""
+    conn = None
+    try:
+        conn = await get_db_connection()
+        if not conn:
+            await message.answer("⚠️ Error de conexión a la base de datos.")
+            return
+
+        registros = await conn.fetch(
+            "SELECT cedula, placa, tipo_carga, bascula, peso, fecha FROM conductores ORDER BY fecha DESC LIMIT 10"
+        )
+
+        mensaje = "📊 *REPORTE CONDUCTORES - ÚLTIMOS 10 REGISTROS*\n\n"
+
+        if registros:
+            for i, reg in enumerate(registros, 1):
+                fecha = reg['fecha'].strftime('%d/%m %H:%M')
+                mensaje += (
+                    f"{i}. {fecha}\n"
+                    f"   • Cédula: {reg['cedula']}\n"
+                    f"   • Placa: {reg['placa']}\n"
+                    f"   • Carga: {reg['tipo_carga']}\n"
+                    f"   • Báscula: {reg['bascula']}\n"
+                    f"   • Peso: {reg['peso']:.2f} kg\n\n"
+                )
+        else:
+            mensaje += "No hay registros de Conductores."
+
+        mensaje += f"\n🐷 *LOMAROSA* 🐷\n_Campo bien hecho, cerdos bien criados_"
+
+        await message.answer(mensaje, parse_mode="Markdown")
+
+    except Exception as e:
+        await message.answer(f"⚠️ Error al generar reporte: {e}")
+        print(f"Error en reporte_conductores: {e}")
+    finally:
+        if conn:
+            await release_db_connection(conn)
 
 # ==================== MENÚ PRINCIPAL MULTI-PERFIL ==================== #
 @dp.message(RegistroState.menu_principal, F.text == "1")
@@ -1944,17 +2220,46 @@ async def enviar_notificacion_grupo_conductor(data: dict):
         return
 
     try:
+        tipo_carga = data.get('tipo_carga')
+        bascula = data.get('bascula')
+
+        # Construir hashtags dinámicos
+        hashtags = ["#Conductores"]
+
+        # Hashtag por tipo de carga
+        if tipo_carga == "Lechones":
+            hashtags.append("#Lechones")
+        elif tipo_carga == "Cerdos Gordos":
+            hashtags.append("#CerdosGordos")
+        elif tipo_carga == "Concentrado":
+            hashtags.append("#Concentrado")
+        elif tipo_carga == "Combustible":
+            hashtags.append("#Combustible")
+
+        # Hashtag por báscula
+        if bascula == "Báscula Italcol":
+            hashtags.append("#Italcol")
+        elif bascula == "Bogotá":
+            hashtags.append("#Bogota")
+        elif bascula == "Finca Tranquera":
+            hashtags.append("#FincaTranquera")
+
+        # Hashtag de alerta si hay cerdos muertos
+        cerdos_muertos = data.get('cerdos_muertos', 0)
+        if cerdos_muertos > 0:
+            hashtags.append("#AlertaCritica")
+            hashtags.append("#CerdosMuertos")
+
         # Crear mensaje
-        mensaje_lineas = ["🚛 *NUEVO REGISTRO DE CONDUCTOR*\n"]
+        mensaje_lineas = ["🚛 *NUEVO REGISTRO DE CONDUCTOR*"]
+        mensaje_lineas.append(" ".join(hashtags) + "\n")
 
         timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
         mensaje_lineas.append(f"📅 Fecha: {timestamp}\n")
 
         mensaje_lineas.append(f"👤 Cédula: *{data.get('cedula')}*")
         mensaje_lineas.append(f"🚛 Placa: *{data.get('placa')}*")
-        mensaje_lineas.append(f"📦 Tipo de carga: *{data.get('tipo_carga')}*\n")
-
-        tipo_carga = data.get('tipo_carga')
+        mensaje_lineas.append(f"📦 Tipo de carga: *{tipo_carga}*\n")
 
         # Detalles según tipo de carga
         if tipo_carga in ["Lechones", "Cerdos Gordos"]:
@@ -2513,7 +2818,8 @@ async def enviar_notificacion_grupo_sitio1(data: dict, peso_total: float, peso_p
         lechones_por_grupo = data.get("lechones_por_grupo")
 
         # Crear mensaje
-        mensaje = "🐷 *NUEVO REGISTRO - OPERARIO SITIO 1*\n\n"
+        mensaje = "🐷 *NUEVO REGISTRO - OPERARIO SITIO 1*\n"
+        mensaje += "#Sitio1 #Lechones\n\n"
 
         timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
         mensaje += f"📅 Fecha: {timestamp}\n\n"
@@ -2927,6 +3233,7 @@ async def sitio3_terminar_registro(message: types.Message, state: FSMContext):
 
             mensaje_grupo = (
                 "🐷 *NUEVO REGISTRO DE ANIMALES - SITIO 3*\n"
+                "#Sitio3\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"👤 Operario: `{cedula}`\n"
                 f"🕒 Fecha: {fecha_formateada}\n\n"
@@ -3895,6 +4202,7 @@ async def medicion_finalizar_registro(message: types.Message, state: FSMContext)
 
             mensaje_grupo = (
                 "📦 *NUEVA MEDICIÓN DE SILOS - SITIO 3*\n"
+                "#Sitio3\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"👤 Operario: `{cedula}`\n"
                 f"🕒 Fecha: {fecha_formateada}\n\n"
@@ -4462,7 +4770,7 @@ async def destino_terminar_silos(message: types.Message, state: FSMContext):
     total_silos = data.get('total_silos', 0)
     peso_bascula = data.get('peso_bascula_general', 0)
     diferencia = abs(peso_bascula - total_silos)
-    
+
     if diferencia > 0.1:  # Tolerancia de 0.1 kg
         await message.answer(
             f"⚠️ ADVERTENCIA: Falta descargar {peso_bascula - total_silos} kg\n"
@@ -4470,9 +4778,27 @@ async def destino_terminar_silos(message: types.Message, state: FSMContext):
             f"Peso báscula: {peso_bascula} kg\n\n"
             f"Envíe la foto del pesaje:"
         )
+
+        # NUEVA: Alerta al grupo si discrepancia > 100 kg
+        if diferencia > 100 and GROUP_CHAT_ID:
+            try:
+                mensaje_alerta = (
+                    "🚨 *ALERTA DE DISCREPANCIA* 🚨\n"
+                    "#Discrepancia\n\n"
+                    f"⚠️ Diferencia detectada: *{diferencia:.2f} kg*\n\n"
+                    f"📊 Peso báscula: *{peso_bascula:,.2f} kg*\n"
+                    f"📊 Total silos: *{total_silos:,.2f} kg*\n"
+                    f"🚛 Placa: *{data.get('camion', 'N/A')}*\n"
+                    f"👤 Cédula: *{data.get('cedula', 'N/A')}*\n\n"
+                    "⚠️ Se requiere verificación"
+                )
+                await bot.send_message(GROUP_CHAT_ID, mensaje_alerta, parse_mode="Markdown")
+                print(f"✅ Alerta de discrepancia enviada al grupo ({diferencia:.2f} kg)")
+            except Exception as e:
+                print(f"⚠️ Error enviando alerta de discrepancia: {e}")
     else:
         await message.answer("✅ Totales verificados. Envíe la foto del pesaje:")
-    
+
     await state.set_state(RegistroState.foto)
 
 # ==================== FOTO Y GUARDADO ==================== #
