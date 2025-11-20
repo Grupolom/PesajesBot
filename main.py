@@ -917,6 +917,42 @@ async def start(message: types.Message, state: FSMContext):
 
 # ==================== COMANDOS DE REPORTES/CONSULTAS ==================== #
 
+@dp.message(Command("ayuda"))
+async def ayuda(message: types.Message):
+    """Muestra todos los comandos disponibles"""
+    mensaje = (
+        "📚 *COMANDOS DISPONIBLES*\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+        "🏠 *MENÚ PRINCIPAL*\n"
+        "`/start` - Iniciar el bot y ver menú principal\n"
+        "`/ayuda` - Ver esta lista de comandos\n\n"
+
+        "📊 *REPORTES Y CONSULTAS*\n\n"
+
+        "*Ver registros de hoy:*\n"
+        "`/reporte_hoy`\n"
+        "Muestra todos los registros del día actual\n\n"
+
+        "*Buscar por cédula:*\n"
+        "`/reporte_cedula 1234567890`\n"
+        "Muestra todos los registros de una cédula\n"
+        "_Reemplaza 1234567890 con la cédula a buscar_\n\n"
+
+        "*Reportes por sitio:*\n"
+        "`/reporte_sitio3` - Últimos 10 registros Sitio 3\n"
+        "`/reporte_sitio1` - Últimos 10 registros Sitio 1\n"
+        "`/reporte_conductores` - Últimos 10 registros Conductores\n\n"
+
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "💡 *NOTA:* Los comandos se escriben directamente en el chat\n\n"
+
+        "🐷 *LOMAROSA* 🐷\n"
+        "_Campo bien hecho, cerdos bien criados_"
+    )
+
+    await message.answer(mensaje, parse_mode="Markdown")
+
 @dp.message(Command("reporte_hoy"))
 async def reporte_hoy(message: types.Message):
     """Muestra todos los registros del día actual"""
@@ -927,7 +963,8 @@ async def reporte_hoy(message: types.Message):
             await message.answer("⚠️ Error de conexión a la base de datos.")
             return
 
-        fecha_hoy = datetime.now().strftime('%Y-%m-%d')
+        # Fecha como objeto date (no string)
+        fecha_hoy = datetime.now().date()
 
         # Consultar todas las tablas
         sitio3_animales = await conn.fetch(
