@@ -2629,7 +2629,7 @@ async def sitio3_confirmar_rango_invalido(message: types.Message, state: FSMCont
     await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
 
 # PASO 4: Tipo de Comida
-@dp.message(RegistroState.sitio3_tipo_comida, F.text.in_(["Levante", "Engorde", "Finalizador"]))
+@dp.message(RegistroState.sitio3_tipo_comida, F.text.in_(["Levante", "Engorde Medicado", "Finalizador"]))
 async def sitio3_get_tipo_comida(message: types.Message, state: FSMContext):
     """Captura tipo de comida seleccionado"""
     tipo_comida = message.text
@@ -2696,7 +2696,7 @@ async def sitio3_confirmar_tipo_comida_no(message: types.Message, state: FSMCont
     """Rechaza tipo de comida y vuelve a preguntar"""
     builder = ReplyKeyboardBuilder()
     builder.button(text="Levante")
-    builder.button(text="Engorde")
+    builder.button(text="Engorde Medicado")
     builder.button(text="Finalizador")
     builder.adjust(2)
 
