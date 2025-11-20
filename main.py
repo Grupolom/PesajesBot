@@ -224,8 +224,8 @@ class RegistroState(StatesGroup):
     # Estados para Registro de Animales
     sitio3_cedula = State()
     sitio3_confirmar_cedula = State()
-    sitio3_cantidad_animales = State()
-    sitio3_confirmar_cantidad = State()
+    sitio3_numero_banda = State()  # Cambiado de sitio3_cantidad_animales
+    sitio3_confirmar_banda = State()  # Cambiado de sitio3_confirmar_cantidad
     sitio3_rango_corrales = State()
     sitio3_confirmar_rango = State()
     sitio3_tipo_comida = State()
@@ -382,20 +382,20 @@ def validar_cedula_sitio3(valor: str) -> bool:
         return False
     return True
 
-def validar_cantidad_animales(valor: str) -> tuple[bool, int, str]:
+def validar_numero_banda(valor: str) -> tuple[bool, str, str]:
     """
-    Valida cantidad de animales: entero positivo, 1-2000
-    Retorna: (es_valido, cantidad, mensaje_error)
+    Valida número de banda: acepta cualquier texto (números, letras, guiones, etc.)
+    Retorna: (es_valido, banda, mensaje_error)
     """
-    try:
-        cantidad = int(valor)
-        if cantidad < 1:
-            return False, 0, "La cantidad debe ser al menos 1 animal"
-        if cantidad > 2000:
-            return False, 0, "La cantidad no puede superar 2000 animales"
-        return True, cantidad, ""
-    except ValueError:
-        return False, 0, "Debe ingresar un número entero válido"
+    valor = valor.strip()
+
+    if not valor:
+        return False, "", "Debe ingresar un número de banda"
+
+    if len(valor) > 50:
+        return False, "", "El número de banda no puede superar 50 caracteres"
+
+    return True, valor, ""
 
 def validar_rango_corrales(valor: str) -> tuple[bool, str]:
     """
@@ -2500,8 +2500,8 @@ async def sitio3_confirmar_cedula_si(message: types.Message, state: FSMContext):
             tipo_operacion="Registro de Animales"
         )
 
-    await message.answer("¿Cuántos animales hay en este corral?")
-    await state.set_state(RegistroState.sitio3_cantidad_animales)
+    await message.answer("Escriba número de banda:")
+    await state.set_state(RegistroState.sitio3_numero_banda)
 
 @dp.message(RegistroState.sitio3_confirmar_cedula, F.text == "2")
 async def sitio3_confirmar_cedula_no(message: types.Message, state: FSMContext):
@@ -2514,50 +2514,36 @@ async def sitio3_confirmar_cedula_invalido(message: types.Message, state: FSMCon
     """Handler para respuestas inválidas en confirmación de cédula"""
     await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
 
-# PASO 2: Cantidad de Animales
-@dp.message(RegistroState.sitio3_cantidad_animales)
-async def sitio3_get_cantidad(message: types.Message, state: FSMContext):
-    """Captura y valida cantidad de animales"""
-    cantidad_texto = message.text.strip()
+# PASO 2: Número de Banda
+@dp.message(RegistroState.sitio3_numero_banda)
+async def sitio3_get_banda(message: types.Message, state: FSMContext):
+    """Captura y valida número de banda"""
+    banda_texto = message.text.strip()
 
-    es_valido, cantidad, mensaje_error = validar_cantidad_animales(cantidad_texto)
+    es_valido, banda, mensaje_error = validar_numero_banda(banda_texto)
 
     if not es_valido:
         await message.answer(f"⚠️ {mensaje_error}\n\nPor favor, intente nuevamente:")
         return
 
-    # Guardar cantidad temporalmente
-    await state.update_data(sitio3_cantidad_temp=cantidad)
+    # Guardar banda temporalmente
+    await state.update_data(sitio3_banda_temp=banda)
 
-    # Si es > 1000, mostrar advertencia especial
-    if cantidad > 1000:
-        await message.answer(
-            "⚠️ *ADVERTENCIA*\n\n"
-            f"Está registrando *MÁS de 1000 animales* en un solo corral.\n"
-            f"Normalmente el rango es de 0 a 700 animales.\n\n"
-            f"Cantidad ingresada: *{cantidad} animales*\n\n"
-            "¿Está seguro de continuar?\n\n"
-            "1️⃣ Sí, es correcto\n"
-            "2️⃣ No, corregir cantidad\n\n"
-            "Escriba el número de la opción:",
-            parse_mode="Markdown"
-        )
-    else:
-        # Confirmación normal
-        await message.answer(
-            f"🐷 Cantidad: *{cantidad} animales*\n\n"
-            "¿Es correcto?\n\n"
-            "1️⃣ Sí, confirmar\n"
-            "2️⃣ No, editar\n\n"
-            "Escriba el número de la opción:",
-            parse_mode="Markdown"
-        )
+    # Confirmación
+    await message.answer(
+        f"🏷️ Número de banda: *{banda}*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
 
-    await state.set_state(RegistroState.sitio3_confirmar_cantidad)
+    await state.set_state(RegistroState.sitio3_confirmar_banda)
 
-@dp.message(RegistroState.sitio3_confirmar_cantidad, F.text == "1")
-async def sitio3_confirmar_cantidad_si(message: types.Message, state: FSMContext):
-    """Confirma cantidad y pasa a rango de corrales"""
+@dp.message(RegistroState.sitio3_confirmar_banda, F.text == "1")
+async def sitio3_confirmar_banda_si(message: types.Message, state: FSMContext):
+    """Confirma banda y pasa a rango de corrales"""
     await message.answer(
         "¿En qué corrales están los animales?\n\n"
         "Por favor ingrese el rango en formato: *#-#*\n\n"
@@ -2569,26 +2555,14 @@ async def sitio3_confirmar_cantidad_si(message: types.Message, state: FSMContext
     )
     await state.set_state(RegistroState.sitio3_rango_corrales)
 
-@dp.message(RegistroState.sitio3_confirmar_cantidad, F.text == "2")
-async def sitio3_confirmar_cantidad_no(message: types.Message, state: FSMContext):
-    """Rechaza cantidad y vuelve a preguntar"""
-    data = await state.get_data()
-    corrales_registrados = data.get('sitio3_corrales', [])
+@dp.message(RegistroState.sitio3_confirmar_banda, F.text == "2")
+async def sitio3_confirmar_banda_no(message: types.Message, state: FSMContext):
+    """Rechaza banda y vuelve a preguntar"""
+    await message.answer("Escriba número de banda:")
+    await state.set_state(RegistroState.sitio3_numero_banda)
 
-    if len(corrales_registrados) > 0:
-        # Si ya hay corrales registrados, especificar que es para un nuevo corral
-        await message.answer(
-            "¿Cuántos animales hay en ESTE NUEVO CORRAL?\n\n"
-            "⚠️ Nota: Ingrese solo la cantidad para este corral,\n"
-            "NO la cantidad total acumulada."
-        )
-    else:
-        await message.answer("¿Cuántos animales hay en este corral?")
-
-    await state.set_state(RegistroState.sitio3_cantidad_animales)
-
-@dp.message(RegistroState.sitio3_confirmar_cantidad)
-async def sitio3_confirmar_cantidad_invalido(message: types.Message, state: FSMContext):
+@dp.message(RegistroState.sitio3_confirmar_banda)
+async def sitio3_confirmar_banda_invalido(message: types.Message, state: FSMContext):
     """Handler para respuestas inválidas"""
     await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
 
@@ -2685,7 +2659,7 @@ async def sitio3_confirmar_tipo_comida_si(message: types.Message, state: FSMCont
     # Agregar este corral a la lista de corrales
     corrales = data.get('sitio3_corrales', [])
     corrales.append({
-        'cantidad': data['sitio3_cantidad_temp'],
+        'banda': data['sitio3_banda_temp'],
         'rango': data['sitio3_rango_temp'],
         'tipo_comida': data['sitio3_tipo_comida_temp']
     })
@@ -2693,17 +2667,15 @@ async def sitio3_confirmar_tipo_comida_si(message: types.Message, state: FSMCont
     await state.update_data(sitio3_corrales=corrales)
 
     # Mostrar resumen y preguntar si desea agregar más
-    total_animales = sum(c['cantidad'] for c in corrales)
-
     resumen = "✅ Corral registrado correctamente.\n\n"
     resumen += "📊 *Resumen hasta ahora:*\n"
     for i, corral in enumerate(corrales, 1):
         resumen += f"\n🔹 Corrales {corral['rango']}\n"
-        resumen += f"   • Animales: {corral['cantidad']}\n"
+        resumen += f"   • Banda: {corral['banda']}\n"
         resumen += f"   • Comida: {corral['tipo_comida']}\n"
 
     resumen += f"\n━━━━━━━━━━━━━━━━━━━━\n"
-    resumen += f"🏋️ *TOTAL: {total_animales:,} animales*\n"
+    resumen += f"📝 *Total de corrales registrados: {len(corrales)}*\n"
 
     await message.answer(resumen, parse_mode="Markdown")
 
@@ -2744,12 +2716,10 @@ async def sitio3_confirmar_tipo_comida_invalido(message: types.Message, state: F
 async def sitio3_agregar_otro_corral(message: types.Message, state: FSMContext):
     """Usuario quiere agregar otro corral"""
     await message.answer(
-        "¿Cuántos animales hay en ESTE NUEVO CORRAL?\n\n"
-        "⚠️ Nota: Ingrese solo la cantidad para este corral,\n"
-        "NO la cantidad total acumulada.",
+        "Escriba número de banda:",
         reply_markup=types.ReplyKeyboardRemove()
     )
-    await state.set_state(RegistroState.sitio3_cantidad_animales)
+    await state.set_state(RegistroState.sitio3_numero_banda)
 
 @dp.message(RegistroState.sitio3_agregar_mas, F.text.in_(["❌ No, terminar", "No", "2"]))
 async def sitio3_terminar_registro(message: types.Message, state: FSMContext):
@@ -2778,9 +2748,9 @@ async def sitio3_terminar_registro(message: types.Message, state: FSMContext):
             for corral in corrales:
                 await conn.execute('''
                     INSERT INTO operario_sitio3_animales
-                    (cedula_operario, cantidad_animales, rango_corrales, tipo_comida, fecha_registro, session_id, telegram_user_id)
+                    (cedula_operario, bandas, rango_corrales, tipo_comida, fecha_registro, session_id, telegram_user_id)
                     VALUES ($1, $2, $3, $4, $5, $6, $7)
-                ''', cedula, corral['cantidad'], corral['rango'], corral['tipo_comida'], fecha_registro, session_id, telegram_user_id)
+                ''', cedula, corral['banda'], corral['rango'], corral['tipo_comida'], fecha_registro, session_id, telegram_user_id)
 
             print(f"✅ {len(corrales)} corrales guardados en BD (session: {session_id})")
         else:
@@ -2795,7 +2765,6 @@ async def sitio3_terminar_registro(message: types.Message, state: FSMContext):
             await release_db_connection(conn)
 
     # Calcular totales
-    total_animales = sum(c['cantidad'] for c in corrales)
     total_corrales = len(corrales)
 
     # Generar notificación para el grupo de Telegram
@@ -2815,13 +2784,13 @@ async def sitio3_terminar_registro(message: types.Message, state: FSMContext):
             for corral in corrales:
                 mensaje_grupo += (
                     f"🔹 *Corrales {corral['rango']}*\n"
-                    f"   • Animales: {corral['cantidad']}\n"
+                    f"   • Banda: {corral['banda']}\n"
                     f"   • Comida: {corral['tipo_comida']}\n\n"
                 )
 
             mensaje_grupo += (
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🏋️ *TOTAL: {total_animales:,} animales registrados*"
+                f"📝 *Total de corrales: {total_corrales}*"
             )
 
             await bot.send_message(GROUP_CHAT_ID, mensaje_grupo, parse_mode="Markdown")
@@ -2834,8 +2803,7 @@ async def sitio3_terminar_registro(message: types.Message, state: FSMContext):
     resumen_usuario = (
         "✅ *Registro completado exitosamente*\n\n"
         "📊 *Resumen:*\n\n"
-        f"• Total de corrales: {total_corrales}\n"
-        f"• Total de animales: *{total_animales:,}*\n\n"
+        f"• Total de corrales registrados: {total_corrales}\n\n"
         "Gracias por registrar la información."
     )
 
