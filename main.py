@@ -261,6 +261,69 @@ class RegistroState(StatesGroup):
 class ConductoresState(StatesGroup):
     """Estados separados para el menú de conductores"""
     menu_conductores = State()
+    
+    # Flujo de registro de pesaje conductores
+    cedula = State()
+    confirmar_cedula = State()
+    
+    placa = State()
+    confirmar_placa = State()
+    
+    tipo_transporte = State()
+    confirmar_tipo_transporte = State()
+    
+    # Estados específicos para cada tipo de carga
+    num_animales = State()
+    confirmar_num_animales = State()
+    
+    tipo_combustible = State()
+    confirmar_tipo_combustible = State()
+    
+    cantidad_galones = State()
+    confirmar_cantidad_galones = State()
+    
+    numero_factura = State()
+    confirmar_numero_factura = State()
+    
+    tipo_alimento = State()
+    confirmar_tipo_alimento = State()
+    
+    kilos_comprados = State()
+    confirmar_kilos_comprados = State()
+    
+    factura_foto = State()
+    
+    # Selección de báscula
+    bascula = State()
+    confirmar_bascula = State()
+    
+    # Registro de peso
+    peso = State()
+    confirmar_peso_input = State()
+    
+    foto_pesaje = State()
+    confirmar_peso = State()
+    
+    # Flujo especial para báscula Bogotá (solo cerdos gordos)
+    cerdos_vivos = State()
+    confirmar_cerdos_vivos = State()
+    
+    cerdos_muertos = State()
+    confirmar_cerdos_muertos = State()
+
+# ==================== ESTADOS PARA OPERARIO SITIO 1 ==================== #
+class OperarioSitio1State(StatesGroup):
+    """Estados para el menú de Operario Sitio 1 (Granja)"""
+    cedula = State()
+    confirmar_cedula = State()
+    
+    cantidad_lechones = State()
+    confirmar_cantidad = State()
+    
+    # Estados para el loop de pesaje
+    peso_lechon = State()  # Peso del lechón actual
+    confirmar_peso = State()  # Confirmar peso del lechón
+    foto_lechon = State()  # Foto del pesaje
 
 # ==================== VALIDACIONES ==================== #
 def validar_cedula(valor):
@@ -268,6 +331,44 @@ def validar_cedula(valor):
 
 def validar_placa(valor):
     return re.fullmatch(r"^[A-Z]{3}\d{3}$", valor.upper())
+
+def validar_placa_conductor(valor: str) -> bool:
+    """Valida placa de camión: 3 letras mayúsculas + 3 números (ej: NHU982)"""
+    return re.fullmatch(r"^[A-Z]{3}\d{3}$", valor.upper()) is not None
+
+def validar_numero_entero(valor: str, minimo: int = 1, maximo: int = 10000) -> tuple[bool, int, str]:
+    """
+    Valida número entero positivo dentro de un rango
+    Retorna: (es_valido, numero, mensaje_error)
+    """
+    try:
+        numero = int(valor)
+        if numero < minimo:
+            return False, 0, f"El número debe ser al menos {minimo}"
+        if numero > maximo:
+            return False, 0, f"El número no puede superar {maximo}"
+        return True, numero, ""
+    except ValueError:
+        return False, 0, "Debe ingresar un número entero válido"
+
+def validar_galones(valor: str) -> tuple[bool, float, str]:
+    """
+    Valida cantidad de galones: número positivo, puede tener decimales
+    Retorna: (es_valido, cantidad, mensaje_error)
+    """
+    try:
+        # Reemplazar coma por punto para decimales
+        valor_limpio = valor.replace(",", ".")
+        galones = float(valor_limpio)
+        
+        if galones <= 0:
+            return False, 0, "La cantidad debe ser mayor a 0"
+        if galones > 100000:
+            return False, 0, "La cantidad no puede superar 100,000 galones"
+        
+        return True, galones, ""
+    except ValueError:
+        return False, 0, "Debe ingresar un número válido (puede usar decimales con coma o punto)"
 
 def validar_peso(valor):
     return re.fullmatch(r"^\d+(,\d+)?$", valor)
@@ -602,47 +703,1394 @@ async def menu_operario_sitio3(message: types.Message, state: FSMContext):
 
 @dp.message(RegistroState.menu_principal, F.text == "2")
 async def menu_operario_sitio1(message: types.Message, state: FSMContext):
-    """Opción 2: Operario Sitio 1 (Placeholder)"""
+    """Opción 2: Operario Sitio 1 - Registro de Lechones"""
+    # Guardar telegram_id automáticamente
+    telegram_id = message.from_user.id
+    await state.update_data(telegram_id=telegram_id)
+    
     await message.answer(
-        "🚧 *OPERARIO SITIO 1*\n\n"
-        "Esta funcionalidad estará disponible próximamente.\n\n"
-        "Volviendo al menú principal...",
+        "🐷 *OPERARIO SITIO 1 - REGISTRO DE LECHONES*\n\n"
+        "Por favor, ingrese su *cédula*:",
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
-    await volver_menu_principal(message, state)
+    await state.set_state(OperarioSitio1State.cedula)
 
 @dp.message(RegistroState.menu_principal, F.text == "3")
 async def menu_conductores(message: types.Message, state: FSMContext):
-    """Opción 3: Conductores (Sistema de Pesajes Antiguo)"""
+    """Opción 3: Conductores - Nuevo flujo de pesajes"""
+    await state.clear()
+    # Guardar telegram_id automáticamente
+    await state.update_data(telegram_id=message.from_user.id)
     await message.answer(
-        "🚛 *CONDUCTORES - SISTEMA DE PESAJES*\n\n"
-        "¿Qué desea hacer?\n\n"
-        "1️⃣ Registrar Pesaje\n"
-        "2️⃣ Consultar Capacidad de Silos\n"
-        "3️⃣ Restar Peso de Silo\n\n"
-        "Escriba el número de la opción:",
+        "🚛 *CONDUCTORES - REGISTRO DE PESAJE*\n\n"
+        "Por favor, ingrese su *cédula*:",
         parse_mode="Markdown"
     )
-    await state.set_state(ConductoresState.menu_conductores)
+    await state.set_state(ConductoresState.cedula)
 
-# ==================== MENÚ CONDUCTORES (SISTEMA ANTIGUO) ==================== #
-@dp.message(ConductoresState.menu_conductores, F.text == "1")
-async def iniciar_registro_conductor(message: types.Message, state: FSMContext):
-    """Conductores - Opción 1: Registrar Pesaje"""
-    await message.answer("Por favor, ingrese su cédula:")
-    await state.set_state(RegistroState.cedula)
+# ==================== NUEVO FLUJO CONDUCTORES ==================== #
 
-@dp.message(ConductoresState.menu_conductores, F.text == "2")
-async def consultar_silos_conductor(message: types.Message, state: FSMContext):
-    """Conductores - Opción 2: Consultar Silos"""
-    await message.answer("Ingrese el número del silo que desea consultar:")
-    await state.set_state(RegistroState.consulta_silo)
+# Función helper para confirmaciones
+async def preguntar_confirmacion(message: types.Message, valor: str, campo: str):
+    """Pregunta si el valor ingresado es correcto"""
+    keyboard = ReplyKeyboardBuilder()
+    keyboard.button(text="1. Confirmar")
+    keyboard.button(text="2. Modificar")
+    keyboard.adjust(2)
+    
+    await message.answer(
+        f"Usted ingresó: *{valor}*\n\n"
+        f"¿Está seguro que está correctamente escrito?\n\n"
+        f"1️⃣ Confirmar\n"
+        f"2️⃣ Modificar",
+        reply_markup=keyboard.as_markup(resize_keyboard=True),
+        parse_mode="Markdown"
+    )
 
-@dp.message(ConductoresState.menu_conductores, F.text == "3")
-async def restar_peso_silo_conductor(message: types.Message, state: FSMContext):
-    """Conductores - Opción 3: Restar Peso"""
-    await message.answer("Ingrese el número del silo del cual desea restar peso:")
-    await state.set_state(RegistroState.restar_silo_numero)
+# 1. CÉDULA
+@dp.message(ConductoresState.cedula)
+async def procesar_cedula_conductor(message: types.Message, state: FSMContext):
+    """Recibe y valida la cédula del conductor"""
+    cedula = message.text.strip()
+    
+    if not validar_cedula(cedula):
+        await message.answer("⚠️ Cédula inválida. Debe contener solo números.\n\nIntente nuevamente:")
+        return
+    
+    await state.update_data(cedula_temp=cedula)
+    await preguntar_confirmacion(message, cedula, "cédula")
+    await state.set_state(ConductoresState.confirmar_cedula)
+
+@dp.message(ConductoresState.confirmar_cedula)
+async def confirmar_cedula_conductor(message: types.Message, state: FSMContext):
+    """Confirma la cédula o permite modificarla"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        await message.answer(
+            "Por favor, ingrese nuevamente su *cédula*:",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.cedula)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        cedula = data.get("cedula_temp")
+        await state.update_data(cedula=cedula)
+        
+        await message.answer(
+            f"✅ Cédula: *{cedula}*\n\n"
+            f"Ahora, ingrese la *placa del camión*:\n"
+            f"_(Formato: 3 letras + 3 números, ejemplo: NHU982)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.placa)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+# 2. PLACA
+@dp.message(ConductoresState.placa)
+async def procesar_placa_conductor(message: types.Message, state: FSMContext):
+    """Recibe y valida la placa del camión"""
+    placa = message.text.strip().upper()
+    
+    if not validar_placa_conductor(placa):
+        await message.answer(
+            "⚠️ Placa inválida. Debe tener el formato: 3 letras + 3 números\n"
+            "Ejemplo: NHU982\n\n"
+            "Intente nuevamente:"
+        )
+        return
+    
+    await state.update_data(placa_temp=placa)
+    await preguntar_confirmacion(message, placa, "placa")
+    await state.set_state(ConductoresState.confirmar_placa)
+
+@dp.message(ConductoresState.confirmar_placa)
+async def confirmar_placa_conductor(message: types.Message, state: FSMContext):
+    """Confirma la placa o permite modificarla"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        await message.answer(
+            "Por favor, ingrese nuevamente la *placa del camión*:\n"
+            "_(Formato: 3 letras + 3 números, ejemplo: NHU982)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.placa)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        placa = data.get("placa_temp")
+        await state.update_data(placa=placa)
+        
+        # Crear teclado con opciones
+        keyboard = ReplyKeyboardBuilder()
+        keyboard.button(text="1. Lechones")
+        keyboard.button(text="2. Concentrado")
+        keyboard.button(text="3. Cerdos Gordos")
+        keyboard.button(text="4. Combustible")
+        keyboard.adjust(2, 2)
+        
+        await message.answer(
+            f"✅ Placa: *{placa}*\n\n"
+            f"¿Qué va a transportar?\n\n"
+            f"1️⃣ Lechones (cerdos pequeños)\n"
+            f"2️⃣ Concentrado (alimento)\n"
+            f"3️⃣ Cerdos Gordos (para venta)\n"
+            f"4️⃣ Combustible (diesel/corriente)\n\n"
+            f"Seleccione una opción:",
+            reply_markup=keyboard.as_markup(resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.tipo_transporte)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+# 3. TIPO DE TRANSPORTE
+@dp.message(ConductoresState.tipo_transporte)
+async def procesar_tipo_transporte(message: types.Message, state: FSMContext):
+    """Procesa el tipo de carga a transportar"""
+    texto = message.text.strip().lower()
+    
+    # Mapear la entrada del usuario
+    tipo_carga = None
+    if "1" in texto or "lechon" in texto:
+        tipo_carga = "Lechones"
+    elif "2" in texto or "concentrado" in texto:
+        tipo_carga = "Concentrado"
+    elif "3" in texto or "cerdo" in texto or "gordo" in texto:
+        tipo_carga = "Cerdos Gordos"
+    elif "4" in texto or "combustible" in texto:
+        tipo_carga = "Combustible"
+    else:
+        await message.answer("⚠️ Opción no válida. Por favor seleccione una de las opciones del menú.")
+        return
+    
+    await state.update_data(tipo_carga_temp=tipo_carga)
+    await preguntar_confirmacion(message, tipo_carga, "tipo de transporte")
+    await state.set_state(ConductoresState.confirmar_tipo_transporte)
+
+@dp.message(ConductoresState.confirmar_tipo_transporte)
+async def confirmar_tipo_transporte(message: types.Message, state: FSMContext):
+    """Confirma el tipo de transporte o permite modificarlo"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        # Volver a mostrar opciones
+        keyboard = ReplyKeyboardBuilder()
+        keyboard.button(text="1. Lechones")
+        keyboard.button(text="2. Concentrado")
+        keyboard.button(text="3. Cerdos Gordos")
+        keyboard.button(text="4. Combustible")
+        keyboard.adjust(2, 2)
+        
+        await message.answer(
+            "¿Qué va a transportar?\n\n"
+            "1️⃣ Lechones (cerdos pequeños)\n"
+            "2️⃣ Concentrado (alimento)\n"
+            "3️⃣ Cerdos Gordos (para venta)\n"
+            "4️⃣ Combustible (diesel/corriente)\n\n"
+            "Seleccione una opción:",
+            reply_markup=keyboard.as_markup(resize_keyboard=True)
+        )
+        await state.set_state(ConductoresState.tipo_transporte)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        tipo_carga = data.get("tipo_carga_temp")
+        await state.update_data(tipo_carga=tipo_carga)
+    
+        # Dependiendo del tipo de carga, hacer diferentes preguntas
+        if tipo_carga == "Lechones" or tipo_carga == "Cerdos Gordos":
+            animal_tipo = "lechones" if tipo_carga == "Lechones" else "cerdos gordos"
+            await message.answer(
+                f"✅ Tipo de carga: *{tipo_carga}*\n\n"
+                f"¿Cuántos {animal_tipo} va a transportar?\n"
+                f"_(Ingrese solo el número)_",
+                reply_markup=ReplyKeyboardRemove(),
+                parse_mode="Markdown"
+            )
+            await state.set_state(ConductoresState.num_animales)
+        
+        elif tipo_carga == "Combustible":
+            keyboard = ReplyKeyboardBuilder()
+            keyboard.button(text="Diesel")
+            keyboard.button(text="Corriente")
+            keyboard.adjust(2)
+            
+            await message.answer(
+                f"✅ Tipo de carga: *{tipo_carga}*\n\n"
+                f"¿Qué tipo de combustible?\n\n"
+                f"Seleccione una opción:",
+                reply_markup=keyboard.as_markup(resize_keyboard=True),
+                parse_mode="Markdown"
+            )
+            await state.set_state(ConductoresState.tipo_combustible)
+        
+        elif tipo_carga == "Concentrado":
+            await message.answer(
+                f"✅ Tipo de carga: *{tipo_carga}*\n\n"
+                f"📋 *DATOS DE LA FACTURA*\n\n"
+                f"Por favor ingrese el *número de factura*:",
+                reply_markup=ReplyKeyboardRemove(),
+                parse_mode="Markdown"
+            )
+            await state.set_state(ConductoresState.numero_factura)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+# 4a. NÚMERO DE ANIMALES (para Lechones o Cerdos Gordos)
+@dp.message(ConductoresState.num_animales)
+async def procesar_num_animales(message: types.Message, state: FSMContext):
+    """Procesa el número de animales"""
+    es_valido, cantidad, error = validar_numero_entero(message.text.strip(), minimo=1, maximo=5000)
+    
+    if not es_valido:
+        await message.answer(f"⚠️ {error}\n\nIntente nuevamente:")
+        return
+    
+    await state.update_data(num_animales_temp=cantidad)
+    await preguntar_confirmacion(message, str(cantidad), "cantidad de animales")
+    await state.set_state(ConductoresState.confirmar_num_animales)
+
+@dp.message(ConductoresState.confirmar_num_animales)
+async def confirmar_num_animales(message: types.Message, state: FSMContext):
+    """Confirma la cantidad de animales o permite modificarla"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        data = await state.get_data()
+        tipo_carga = data.get("tipo_carga")
+        animal_tipo = "lechones" if tipo_carga == "Lechones" else "cerdos gordos"
+        
+        await message.answer(
+            f"¿Cuántos {animal_tipo} va a transportar?\n"
+            f"_(Ingrese solo el número)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.num_animales)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        cantidad = data.get("num_animales_temp")
+        await state.update_data(num_animales=cantidad)
+        
+        # Continuar al siguiente paso: selección de báscula
+        await preguntar_bascula(message, state)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+# 4b. TIPO DE COMBUSTIBLE
+@dp.message(ConductoresState.tipo_combustible)
+async def procesar_tipo_combustible(message: types.Message, state: FSMContext):
+    """Procesa el tipo de combustible"""
+    tipo = message.text.strip().title()
+    
+    if tipo not in ["Diesel", "Corriente"]:
+        await message.answer("⚠️ Opción no válida. Seleccione Diesel o Corriente:")
+        return
+    
+    await state.update_data(tipo_combustible_temp=tipo)
+    await preguntar_confirmacion(message, tipo, "tipo de combustible")
+    await state.set_state(ConductoresState.confirmar_tipo_combustible)
+
+@dp.message(ConductoresState.confirmar_tipo_combustible)
+async def confirmar_tipo_combustible(message: types.Message, state: FSMContext):
+    """Confirma el tipo de combustible o permite modificarlo"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        keyboard = ReplyKeyboardBuilder()
+        keyboard.button(text="Diesel")
+        keyboard.button(text="Corriente")
+        keyboard.adjust(2)
+        
+        await message.answer(
+            "¿Qué tipo de combustible?\n\n"
+            "Seleccione una opción:",
+            reply_markup=keyboard.as_markup(resize_keyboard=True)
+        )
+        await state.set_state(ConductoresState.tipo_combustible)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        tipo = data.get("tipo_combustible_temp")
+        await state.update_data(tipo_combustible=tipo)
+        
+        await message.answer(
+            f"✅ Tipo de combustible: *{tipo}*\n\n"
+            f"¿Cuántos galones va a transportar?\n"
+            f"_(Puede usar decimales con coma o punto)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.cantidad_galones)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+# 4c. CANTIDAD DE GALONES
+@dp.message(ConductoresState.cantidad_galones)
+async def procesar_cantidad_galones(message: types.Message, state: FSMContext):
+    """Procesa la cantidad de galones"""
+    es_valido, galones, error = validar_galones(message.text.strip())
+    
+    if not es_valido:
+        await message.answer(f"⚠️ {error}\n\nIntente nuevamente:")
+        return
+    
+    await state.update_data(cantidad_galones_temp=galones)
+    await preguntar_confirmacion(message, f"{galones:,.2f} galones", "cantidad")
+    await state.set_state(ConductoresState.confirmar_cantidad_galones)
+
+@dp.message(ConductoresState.confirmar_cantidad_galones)
+async def confirmar_cantidad_galones(message: types.Message, state: FSMContext):
+    """Confirma la cantidad de galones o permite modificarla"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        await message.answer(
+            "¿Cuántos galones va a transportar?\n"
+            "_(Puede usar decimales con coma o punto)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.cantidad_galones)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        galones = data.get("cantidad_galones_temp")
+        await state.update_data(cantidad_galones=galones)
+        
+        # Continuar a selección de báscula
+        await preguntar_bascula(message, state)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+# 4d. DATOS DE FACTURA (para Concentrado)
+@dp.message(ConductoresState.numero_factura)
+async def procesar_numero_factura(message: types.Message, state: FSMContext):
+    """Procesa el número de factura"""
+    numero = message.text.strip()
+    await state.update_data(numero_factura_temp=numero)
+    
+    await preguntar_confirmacion(message, numero, "número de factura")
+    await state.set_state(ConductoresState.confirmar_numero_factura)
+
+@dp.message(ConductoresState.confirmar_numero_factura)
+async def confirmar_numero_factura(message: types.Message, state: FSMContext):
+    """Confirma el número de factura o permite modificarlo"""
+    texto = message.text.strip().lower()
+    print(f"DEBUG confirmar_numero_factura: texto='{texto}'")
+    
+    if "2" in texto or "modificar" in texto:
+        print("DEBUG: Entrando a modificar")
+        await message.answer(
+            "✏️ Ingrese nuevamente el *número de factura*:",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.numero_factura)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        print("DEBUG: Entrando a confirmar")
+        data = await state.get_data()
+        numero = data.get("numero_factura_temp")
+        print(f"DEBUG: numero={numero}")
+        await state.update_data(numero_factura=numero)
+        
+        # Preguntar tipo de alimento
+        keyboard = ReplyKeyboardBuilder()
+        keyboard.button(text="1. Levante")
+        keyboard.button(text="2. Engorde/Medicado")
+        keyboard.button(text="3. Finalizador")
+        keyboard.adjust(1)
+        
+        print("DEBUG: Enviando mensaje de tipo de alimento")
+        await message.answer(
+            f"✅ Número de factura: *{numero}*\n\n"
+            f"📋 Seleccione el *tipo de alimento*:\n\n"
+            f"1️⃣ *Levante*\n"
+            f"2️⃣ *Engorde/Medicado*\n"
+            f"3️⃣ *Finalizador*",
+            reply_markup=keyboard.as_markup(resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        print("DEBUG: Cambiando estado a tipo_alimento")
+        await state.set_state(ConductoresState.tipo_alimento)
+        print("DEBUG: Estado cambiado exitosamente")
+        return
+    
+    print("DEBUG: Opción no válida")
+    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+@dp.message(ConductoresState.tipo_alimento)
+async def procesar_tipo_alimento(message: types.Message, state: FSMContext):
+    """Procesa la selección del tipo de alimento"""
+    texto = message.text.strip().lower()
+    
+    tipo = None
+    if "1" in texto or "levante" in texto:
+        tipo = "Levante"
+    elif "2" in texto or "engorde" in texto or "medicado" in texto:
+        tipo = "Engorde/Medicado"
+    elif "3" in texto or "finalizador" in texto:
+        tipo = "Finalizador"
+    else:
+        await message.answer(
+            "⚠️ Opción no válida.\n\n"
+            "Seleccione:\n"
+            "1️⃣ Levante\n"
+            "2️⃣ Engorde/Medicado\n"
+            "3️⃣ Finalizador"
+        )
+        return
+    
+    await state.update_data(tipo_alimento_temp=tipo)
+    await preguntar_confirmacion(message, tipo, "tipo de alimento")
+    await state.set_state(ConductoresState.confirmar_tipo_alimento)
+
+@dp.message(ConductoresState.confirmar_tipo_alimento)
+async def confirmar_tipo_alimento(message: types.Message, state: FSMContext):
+    """Confirma el tipo de alimento o permite modificarlo"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        keyboard = ReplyKeyboardBuilder()
+        keyboard.button(text="1. Levante")
+        keyboard.button(text="2. Engorde/Medicado")
+        keyboard.button(text="3. Finalizador")
+        keyboard.adjust(1)
+        
+        await message.answer(
+            "✏️ Seleccione nuevamente el *tipo de alimento*:\n\n"
+            f"1️⃣ *Levante*\n"
+            f"2️⃣ *Engorde/Medicado*\n"
+            f"3️⃣ *Finalizador*",
+            reply_markup=keyboard.as_markup(resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.tipo_alimento)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        tipo = data.get("tipo_alimento_temp")
+        await state.update_data(tipo_alimento=tipo)
+        
+        await message.answer(
+            f"✅ Tipo de alimento: *{tipo}*\n\n"
+            f"📊 Ingrese los *kilos comprados* (número):",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.kilos_comprados)
+        return
+    
+    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+@dp.message(ConductoresState.kilos_comprados)
+async def procesar_kilos_comprados(message: types.Message, state: FSMContext):
+    """Procesa los kilos comprados"""
+    es_valido, kilos, error = validar_galones(message.text.strip())
+    
+    if not es_valido:
+        await message.answer(f"⚠️ {error}\n\nIntente nuevamente:")
+        return
+    
+    await state.update_data(kilos_comprados_temp=kilos)
+    await preguntar_confirmacion(message, f"{kilos:,.2f} kg", "kilos comprados")
+    await state.set_state(ConductoresState.confirmar_kilos_comprados)
+
+@dp.message(ConductoresState.confirmar_kilos_comprados)
+async def confirmar_kilos_comprados(message: types.Message, state: FSMContext):
+    """Confirma los kilos comprados o permite modificarlos"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        await message.answer(
+            "✏️ Ingrese nuevamente los *kilos comprados*:",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.kilos_comprados)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        kilos = data.get("kilos_comprados_temp")
+        await state.update_data(kilos_comprados=kilos)
+        
+        await message.answer(
+            f"✅ Kilos comprados: *{kilos:,.2f} kg*\n\n"
+            f"📸 Ahora envíe una *foto de la factura*:",
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.factura_foto)
+        return
+    
+    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+@dp.message(ConductoresState.factura_foto, F.photo)
+async def procesar_factura_foto(message: types.Message, state: FSMContext):
+    """Procesa la foto de la factura"""
+    # Obtener la foto de mayor resolución
+    photo = message.photo[-1]
+    file_id = photo.file_id
+    
+    # Descargar foto
+    file = await bot.get_file(file_id)
+    os.makedirs("imagenes_pesajes", exist_ok=True)
+    
+    data = await state.get_data()
+    cedula = data.get("cedula")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"factura_{cedula}_{timestamp}.jpg"
+    file_path = os.path.join("imagenes_pesajes", filename)
+    
+    await bot.download_file(file.file_path, file_path)
+    
+    # Subir a Drive
+    drive_link = upload_to_drive(file_path, filename)
+    await state.update_data(factura_foto=drive_link or file_path)
+    
+    await message.answer(
+        f"✅ Foto de factura recibida\n\n"
+        f"Continuando con el registro..."
+    )
+    
+    # Continuar a selección de báscula
+    await preguntar_bascula(message, state)
+
+@dp.message(ConductoresState.factura_foto)
+async def factura_foto_no_valida(message: types.Message, state: FSMContext):
+    """Handler para cuando no envían una foto"""
+    await message.answer("⚠️ Por favor envíe una FOTO de la factura (no texto).")
+
+# 5. SELECCIÓN DE BÁSCULA
+async def preguntar_bascula(message: types.Message, state: FSMContext):
+    """Pregunta qué báscula va a usar, con restricciones según tipo de carga"""
+    data = await state.get_data()
+    tipo_carga = data.get("tipo_carga")
+    
+    # Crear opciones de báscula según restricciones
+    keyboard = ReplyKeyboardBuilder()
+    opciones_texto = []
+    
+    # Báscula Italcol: solo para concentrado (ÚNICA OPCIÓN)
+    if tipo_carga == "Concentrado":
+        keyboard.button(text="1. Báscula Italcol")
+        opciones_texto.append("1️⃣ Báscula Italcol")
+    else:
+        # Para otros tipos de carga
+        # Báscula Bogotá: solo para cerdos gordos
+        if tipo_carga == "Cerdos Gordos":
+            keyboard.button(text="2. Bogotá")
+            opciones_texto.append("2️⃣ Bogotá")
+        
+        # Finca Tranquera: disponible para todos excepto concentrado
+        keyboard.button(text="3. Finca Tranquera")
+        opciones_texto.append("3️⃣ Finca Tranquera")
+    
+    keyboard.adjust(1)  # Una opción por fila
+    
+    opciones_str = "\n".join(opciones_texto)
+    
+    await message.answer(
+        f"🏢 ¿Qué báscula vas a registrar para el pesaje?\n\n"
+        f"{opciones_str}\n\n"
+        f"Seleccione una opción:",
+        reply_markup=keyboard.as_markup(resize_keyboard=True)
+    )
+    await state.set_state(ConductoresState.bascula)
+
+@dp.message(ConductoresState.bascula)
+async def procesar_bascula(message: types.Message, state: FSMContext):
+    """Procesa la selección de báscula"""
+    texto = message.text.strip().lower()
+    data = await state.get_data()
+    tipo_carga = data.get("tipo_carga")
+    
+    bascula = None
+    if "1" in texto or "italcol" in texto:
+        if tipo_carga == "Concentrado":
+            bascula = "Báscula Italcol"
+        else:
+            await message.answer("⚠️ La Báscula Italcol solo está disponible para Concentrado.")
+            return
+    elif "2" in texto or "bogota" in texto or "bogotá" in texto:
+        if tipo_carga == "Cerdos Gordos":
+            bascula = "Bogotá"
+        else:
+            await message.answer("⚠️ Bogotá solo está disponible para Cerdos Gordos.")
+            return
+    elif "3" in texto or "finca" in texto or "tranquera" in texto:
+        bascula = "Finca Tranquera"
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione una de las opciones disponibles.")
+        return
+    
+    await state.update_data(bascula_temp=bascula)
+    await preguntar_confirmacion(message, bascula, "báscula")
+    await state.set_state(ConductoresState.confirmar_bascula)
+
+@dp.message(ConductoresState.confirmar_bascula)
+async def confirmar_bascula(message: types.Message, state: FSMContext):
+    """Confirma la báscula o permite modificarla"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        # Volver a preguntar báscula
+        await preguntar_bascula(message, state)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        bascula = data.get("bascula_temp")
+        await state.update_data(bascula=bascula)
+        
+        # Si es Bogotá, hacer pregunta especial sobre cerdos vivos
+        if bascula == "Bogotá":
+            await message.answer(
+                f"✅ Báscula: *{bascula}*\n\n"
+                f"¿Cuántos cerdos llegan *VIVOS*?\n"
+                f"_(Ingrese solo el número)_",
+                reply_markup=ReplyKeyboardRemove(),
+                parse_mode="Markdown"
+            )
+            await state.set_state(ConductoresState.cerdos_vivos)
+        else:
+            # Continuar con peso normal
+            await message.answer(
+                f"✅ Báscula: *{bascula}*\n\n"
+                f"¿Cuánto pesa? _(en kilogramos)_\n"
+                f"_(Puede usar decimales con coma)_",
+                reply_markup=ReplyKeyboardRemove(),
+                parse_mode="Markdown"
+            )
+            await state.set_state(ConductoresState.peso)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+# 6. FLUJO ESPECIAL BOGOTÁ - Cerdos vivos
+@dp.message(ConductoresState.cerdos_vivos)
+async def procesar_cerdos_vivos(message: types.Message, state: FSMContext):
+    """Procesa cantidad de cerdos vivos y calcula automáticamente los muertos"""
+    es_valido, cantidad_vivos, error = validar_numero_entero(message.text.strip(), minimo=0, maximo=5000)
+    
+    if not es_valido:
+        await message.answer(f"⚠️ {error}\n\nIntente nuevamente:")
+        return
+    
+    await state.update_data(cerdos_vivos_temp=cantidad_vivos)
+    await preguntar_confirmacion(message, str(cantidad_vivos), "cantidad de cerdos vivos")
+    await state.set_state(ConductoresState.confirmar_cerdos_vivos)
+
+@dp.message(ConductoresState.confirmar_cerdos_vivos)
+async def confirmar_cerdos_vivos(message: types.Message, state: FSMContext):
+    """Confirma cantidad de cerdos vivos o permite modificarla"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        await message.answer(
+            "¿Cuántos cerdos llegan *VIVOS*?\n"
+            "_(Ingrese solo el número)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.cerdos_vivos)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        cantidad_vivos = data.get("cerdos_vivos_temp")
+        
+        # Obtener el total de animales para calcular los muertos
+        total_animales = data.get('num_animales', 0)
+        cerdos_muertos = total_animales - cantidad_vivos
+        
+        await state.update_data(
+            cerdos_vivos=cantidad_vivos,
+            cerdos_muertos=cerdos_muertos
+        )
+        
+        if cerdos_muertos > 0:
+            # ALERTA ESPECIAL si hay cerdos muertos
+            await message.answer(
+                f"✅ Cerdos vivos: *{cantidad_vivos}*\n"
+                f"📊 Total de cerdos: *{total_animales}*\n\n"
+                f"🚨 *ALERTA: {cerdos_muertos} CERDOS MUERTOS* 🚨\n\n"
+                f"⚠️ ¡ATENCIÓN! SE DETECTARON ANIMALES MUERTOS\n"
+                f"Cantidad: *{cerdos_muertos}*",
+                parse_mode="Markdown"
+            )
+        else:
+            await message.answer(
+                f"✅ Cerdos vivos: *{cantidad_vivos}*\n"
+                f"📊 Total de cerdos: *{total_animales}*\n"
+                f"✅ Sin cerdos muertos",
+                parse_mode="Markdown"
+            )
+        
+        # Continuar con el peso de los cerdos vivos
+        await message.answer(
+            f"¿Cuánto pesan los *{cantidad_vivos} cerdos VIVOS*? _(en kilogramos)_\n"
+            f"_(Puede usar decimales con coma)_",
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.peso)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+# 7. PESO
+@dp.message(ConductoresState.peso)
+async def procesar_peso(message: types.Message, state: FSMContext):
+    """Procesa el peso del pesaje"""
+    peso_texto = message.text.strip().replace(",", ".")
+    
+    try:
+        peso = float(peso_texto)
+        if peso <= 0:
+            await message.answer("⚠️ El peso debe ser mayor a 0.\n\nIntente nuevamente:")
+            return
+        if peso > 100000:
+            await message.answer("⚠️ El peso no puede superar 100,000 kg.\n\nIntente nuevamente:")
+            return
+    except ValueError:
+        await message.answer("⚠️ Peso inválido. Ingrese un número válido (puede usar decimales).\n\nIntente nuevamente:")
+        return
+    
+    await state.update_data(peso_temp=peso)
+    await preguntar_confirmacion(message, f"{peso:,.2f} kg", "peso")
+    await state.set_state(ConductoresState.confirmar_peso_input)
+
+@dp.message(ConductoresState.confirmar_peso_input)
+async def confirmar_peso_input(message: types.Message, state: FSMContext):
+    """Confirma el peso o permite modificarlo"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        await message.answer(
+            "¿Cuánto pesa? _(en kilogramos)_\n"
+            "_(Puede usar decimales con coma)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.peso)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        peso = data.get("peso_temp")
+        await state.update_data(peso=peso)
+        
+        await message.answer(
+            f"✅ Peso: *{peso:,.2f} kg*\n\n"
+            f"📸 Ahora envíe una *foto del pesaje*:",
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.foto_pesaje)
+    else:
+        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+# 9. FOTO DEL PESAJE
+@dp.message(ConductoresState.foto_pesaje, F.photo)
+async def procesar_foto_pesaje(message: types.Message, state: FSMContext):
+    """Procesa la foto del pesaje"""
+    # Obtener la foto de mayor resolución
+    photo = message.photo[-1]
+    file_id = photo.file_id
+    
+    # Descargar foto
+    file = await bot.get_file(file_id)
+    os.makedirs("imagenes_pesajes", exist_ok=True)
+    
+    data = await state.get_data()
+    cedula = data.get("cedula")
+    placa = data.get("placa")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"pesaje_{placa}_{cedula}_{timestamp}.jpg"
+    file_path = os.path.join("imagenes_pesajes", filename)
+    
+    await bot.download_file(file.file_path, file_path)
+    
+    # Subir a Drive
+    drive_link = upload_to_drive(file_path, filename)
+    await state.update_data(foto_pesaje=drive_link or file_path)
+    
+    # Crear resumen para confirmación
+    resumen = crear_resumen_conductor(data)
+    
+    keyboard = ReplyKeyboardBuilder()
+    keyboard.button(text="✅ Sí, confirmar")
+    keyboard.button(text="❌ No, cancelar")
+    keyboard.adjust(1)
+    
+    await message.answer(
+        f"📋 *RESUMEN DEL REGISTRO*\n\n"
+        f"{resumen}\n\n"
+        f"¿Está seguro de este peso y la información?",
+        reply_markup=keyboard.as_markup(resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+    await state.set_state(ConductoresState.confirmar_peso)
+
+@dp.message(ConductoresState.foto_pesaje)
+async def foto_pesaje_no_valida(message: types.Message, state: FSMContext):
+    """Handler para cuando no envían una foto"""
+    await message.answer("⚠️ Por favor envíe una FOTO del pesaje (no texto).")
+
+# 10. CONFIRMACIÓN FINAL
+@dp.message(ConductoresState.confirmar_peso)
+async def confirmar_registro_conductor(message: types.Message, state: FSMContext):
+    """Confirma y guarda el registro del conductor"""
+    texto = message.text.strip().lower()
+    
+    if "no" in texto or "cancelar" in texto or "❌" in texto:
+        await message.answer(
+            "❌ Registro cancelado.\n\n"
+            "Volviendo al menú principal...",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await volver_menu_principal(message, state)
+        return
+    
+    if "si" in texto or "confirmar" in texto or "✅" in texto or "sí" in texto:
+        # Guardar en base de datos
+        data = await state.get_data()
+        await guardar_registro_conductor(message, state, data)
+    else:
+        await message.answer("⚠️ Por favor seleccione una opción válida (Sí o No).")
+
+# ==================== FUNCIONES AUXILIARES CONDUCTORES ==================== #
+
+def crear_resumen_conductor(data: dict) -> str:
+    """Crea un resumen legible del registro del conductor"""
+    lineas = []
+    lineas.append(f"👤 Cédula: {data.get('cedula')}")
+    lineas.append(f"🚛 Placa: {data.get('placa')}")
+    lineas.append(f"📦 Carga: {data.get('tipo_carga')}")
+    
+    tipo_carga = data.get('tipo_carga')
+    
+    if tipo_carga in ["Lechones", "Cerdos Gordos"]:
+        lineas.append(f"🐷 Cantidad: {data.get('num_animales')} animales")
+        
+    elif tipo_carga == "Combustible":
+        lineas.append(f"⛽ Tipo: {data.get('tipo_combustible')}")
+        lineas.append(f"📊 Galones: {data.get('cantidad_galones'):,.2f}")
+        
+    elif tipo_carga == "Concentrado":
+        lineas.append(f"📋 Número de factura: {data.get('numero_factura')}")
+        lineas.append(f"📋 Tipo de alimento: {data.get('tipo_alimento')}")
+        lineas.append(f"📋 Kilos comprados: {data.get('kilos_comprados'):,.2f} kg")
+    
+    lineas.append(f"🏢 Báscula: {data.get('bascula')}")
+    
+    # Info especial de Bogotá
+    if data.get('bascula') == "Bogotá":
+        lineas.append(f"✅ Cerdos vivos: {data.get('cerdos_vivos', 0)}")
+        if data.get('cerdos_muertos', 0) > 0:
+            lineas.append(f"🚨 Cerdos muertos: {data.get('cerdos_muertos')}")
+    
+    lineas.append(f"⚖️ Peso: {data.get('peso'):,.2f} kg")
+    
+    return "\n".join(lineas)
+
+async def guardar_registro_conductor(message: types.Message, state: FSMContext, data: dict):
+    """Guarda el registro del conductor en la base de datos y envía notificación"""
+    
+    # Guardar en base de datos
+    conn = None
+    try:
+        conn = await get_db_connection()
+        if conn:
+            # Crear tabla si no existe
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS conductores (
+                    id SERIAL PRIMARY KEY,
+                    telegram_id BIGINT NOT NULL,
+                    cedula VARCHAR(20) NOT NULL,
+                    placa VARCHAR(10) NOT NULL,
+                    tipo_carga VARCHAR(50) NOT NULL,
+                    num_animales INTEGER,
+                    tipo_combustible VARCHAR(20),
+                    cantidad_galones DECIMAL(10, 2),
+                    factura_dato1 VARCHAR(200),
+                    factura_dato2 VARCHAR(200),
+                    factura_dato3 VARCHAR(200),
+                    factura_foto TEXT,
+                    bascula VARCHAR(50) NOT NULL,
+                    cerdos_vivos INTEGER,
+                    cerdos_muertos INTEGER,
+                    peso DECIMAL(10, 2) NOT NULL,
+                    foto_pesaje TEXT,
+                    fecha TIMESTAMP DEFAULT NOW()
+                )
+            ''')
+            
+            # Insertar registro
+            await conn.execute('''
+                INSERT INTO conductores (
+                    telegram_id, cedula, placa, tipo_carga, num_animales, tipo_combustible,
+                    cantidad_galones, factura_dato1, factura_dato2, factura_dato3,
+                    factura_foto, bascula, cerdos_vivos, cerdos_muertos, peso, foto_pesaje
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            ''', 
+                data.get('telegram_id'),
+                data.get('cedula'),
+                data.get('placa'),
+                data.get('tipo_carga'),
+                data.get('num_animales'),
+                data.get('tipo_combustible'),
+                data.get('cantidad_galones'),
+                data.get('numero_factura'),
+                data.get('tipo_alimento'),
+                data.get('kilos_comprados'),
+                data.get('factura_foto'),
+                data.get('bascula'),
+                data.get('cerdos_vivos'),
+                data.get('cerdos_muertos'),
+                data.get('peso'),
+                data.get('foto_pesaje')
+            )
+            
+            print("✅ Registro de conductor guardado en base de datos")
+    except Exception as e:
+        print(f"⚠️ Error guardando en base de datos: {e}")
+    finally:
+        if conn:
+            await release_db_connection(conn)
+    
+    # Enviar notificación al grupo
+    await enviar_notificacion_grupo_conductor(data)
+    
+    # Confirmar al usuario
+    await message.answer(
+        "✅ *REGISTRO COMPLETADO EXITOSAMENTE*\n\n"
+        "Su pesaje ha sido registrado correctamente.\n\n"
+        "Volviendo al menú principal...",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="Markdown"
+    )
+    
+    await volver_menu_principal(message, state)
+
+async def enviar_notificacion_grupo_conductor(data: dict):
+    """Envía notificación al grupo de Telegram con la información del conductor"""
+    if not GROUP_CHAT_ID:
+        print("⚠️ GROUP_CHAT_ID no configurado. No se enviará notificación.")
+        return
+    
+    try:
+        # Crear mensaje
+        mensaje_lineas = ["🚛 *NUEVO REGISTRO DE CONDUCTOR*\n"]
+        
+        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
+        mensaje_lineas.append(f"📅 Fecha: {timestamp}\n")
+        
+        mensaje_lineas.append(f"👤 Cédula: *{data.get('cedula')}*")
+        mensaje_lineas.append(f"🚛 Placa: *{data.get('placa')}*")
+        mensaje_lineas.append(f"📦 Tipo de carga: *{data.get('tipo_carga')}*\n")
+        
+        tipo_carga = data.get('tipo_carga')
+        
+        # Detalles según tipo de carga
+        if tipo_carga in ["Lechones", "Cerdos Gordos"]:
+            mensaje_lineas.append(f"🐷 Cantidad de animales: *{data.get('num_animales')}*")
+            
+        elif tipo_carga == "Combustible":
+            mensaje_lineas.append(f"⛽ Tipo de combustible: *{data.get('tipo_combustible')}*")
+            mensaje_lineas.append(f"📊 Cantidad: *{data.get('cantidad_galones'):,.2f} galones*")
+            
+        elif tipo_carga == "Concentrado":
+            mensaje_lineas.append("📋 *DATOS DE FACTURA:*")
+            mensaje_lineas.append(f"   • Número de factura: {data.get('numero_factura')}")
+            mensaje_lineas.append(f"   • Tipo de alimento: {data.get('tipo_alimento')}")
+            mensaje_lineas.append(f"   • Kilos comprados: {data.get('kilos_comprados'):,.2f} kg")
+            if data.get('factura_foto'):
+                mensaje_lineas.append(f"   • [Ver foto de factura]({data.get('factura_foto')})")
+        
+        mensaje_lineas.append(f"\n🏢 Báscula: *{data.get('bascula')}*")
+        
+        # Información especial de Bogotá
+        if data.get('bascula') == "Bogotá":
+            mensaje_lineas.append(f"✅ Cerdos vivos: *{data.get('cerdos_vivos', 0)}*")
+            
+            cerdos_muertos = data.get('cerdos_muertos', 0)
+            if cerdos_muertos > 0:
+                # ALERTA ESPECIAL EN MAYÚSCULAS CON EMOJIS
+                mensaje_lineas.append("\n" + "🔴" * 15)
+                mensaje_lineas.append(f"🚨 *¡¡¡ALERTA CRÍTICA!!!* 🚨")
+                mensaje_lineas.append(f"⚠️ *SE MURIERON {cerdos_muertos} CERDOS* ⚠️")
+                mensaje_lineas.append("🔴" * 15 + "\n")
+        
+        mensaje_lineas.append(f"⚖️ Peso registrado: *{data.get('peso'):,.2f} kg*")
+        
+        if data.get('foto_pesaje'):
+            mensaje_lineas.append(f"\n📸 [Ver foto del pesaje]({data.get('foto_pesaje')})")
+        
+        mensaje = "\n".join(mensaje_lineas)
+        
+        # Enviar mensaje
+        await bot.send_message(
+            chat_id=GROUP_CHAT_ID,
+            text=mensaje,
+            parse_mode="Markdown"
+        )
+        
+        print("✅ Notificación enviada al grupo")
+        
+    except Exception as e:
+        print(f"⚠️ Error enviando notificación al grupo: {e}")
+
+# ==================== OPERARIO SITIO 1 - REGISTRO DE LECHONES ==================== #
+
+@dp.message(OperarioSitio1State.cedula)
+async def procesar_cedula_sitio1(message: types.Message, state: FSMContext):
+    """Procesa la cédula del operario"""
+    cedula = message.text.strip()
+    
+    if not validar_cedula(cedula):
+        await message.answer("⚠️ Cédula inválida. Solo números por favor.\n\nIntente nuevamente:")
+        return
+    
+    await state.update_data(cedula_temp=cedula)
+    await preguntar_confirmacion(message, cedula, "cédula")
+    await state.set_state(OperarioSitio1State.confirmar_cedula)
+
+@dp.message(OperarioSitio1State.confirmar_cedula)
+async def confirmar_cedula_sitio1(message: types.Message, state: FSMContext):
+    """Confirma la cédula o permite modificarla"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        await message.answer(
+            "Por favor, ingrese nuevamente su *cédula*:",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(OperarioSitio1State.cedula)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        cedula = data.get("cedula_temp")
+        await state.update_data(cedula=cedula)
+        
+        await message.answer(
+            f"✅ Cédula: *{cedula}*\n\n"
+            f"¿Cuántos *lechones* va a pesar?\n"
+            f"_(Ingrese un número)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(OperarioSitio1State.cantidad_lechones)
+        return
+    
+    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+@dp.message(OperarioSitio1State.cantidad_lechones)
+async def procesar_cantidad_lechones(message: types.Message, state: FSMContext):
+    """Procesa la cantidad de lechones a pesar"""
+    es_valido, cantidad, error = validar_numero_entero(message.text.strip(), minimo=1, maximo=1000)
+    
+    if not es_valido:
+        await message.answer(f"⚠️ {error}\n\nIntente nuevamente:")
+        return
+    
+    await state.update_data(cantidad_lechones_temp=cantidad)
+    await preguntar_confirmacion(message, str(cantidad), "cantidad de lechones")
+    await state.set_state(OperarioSitio1State.confirmar_cantidad)
+
+@dp.message(OperarioSitio1State.confirmar_cantidad)
+async def confirmar_cantidad_lechones(message: types.Message, state: FSMContext):
+    """Confirma la cantidad de lechones o permite modificarla"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        await message.answer(
+            "¿Cuántos *lechones* va a pesar?\n"
+            f"_(Ingrese un número)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(OperarioSitio1State.cantidad_lechones)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        cantidad = data.get("cantidad_lechones_temp")
+        await state.update_data(
+            cantidad_lechones=cantidad,
+            lechon_actual=1,  # Empezar con el primer lechón
+            pesos=[],  # Lista para almacenar pesos
+            fotos=[]   # Lista para almacenar fotos
+        )
+        
+        await message.answer(
+            f"✅ Cantidad: *{cantidad} lechones*\n\n"
+            f"📊 Ingrese el *peso del lechón #1* en kilogramos:\n"
+            f"_(Ejemplo: 25.5 o 30)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(OperarioSitio1State.peso_lechon)
+        return
+    
+    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+@dp.message(OperarioSitio1State.peso_lechon)
+async def procesar_peso_lechon(message: types.Message, state: FSMContext):
+    """Procesa el peso de un lechón"""
+    es_valido, peso, error = validar_galones(message.text.strip())  # Reutilizamos validador de decimales
+    
+    if not es_valido or peso <= 0 or peso > 500:
+        await message.answer(
+            f"⚠️ Peso inválido. Ingrese un número válido entre 0.1 y 500 kg\n\n"
+            f"Intente nuevamente:"
+        )
+        return
+    
+    data = await state.get_data()
+    lechon_actual = data.get("lechon_actual")
+    
+    await state.update_data(peso_temp=peso)
+    await preguntar_confirmacion(message, f"{peso:,.2f} kg", f"peso del lechón #{lechon_actual}")
+    await state.set_state(OperarioSitio1State.confirmar_peso)
+
+@dp.message(OperarioSitio1State.confirmar_peso)
+async def confirmar_peso_lechon(message: types.Message, state: FSMContext):
+    """Confirma el peso del lechón o permite modificarlo"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "modificar" in texto:
+        data = await state.get_data()
+        lechon_actual = data.get("lechon_actual")
+        await message.answer(
+            f"📊 Ingrese nuevamente el *peso del lechón #{lechon_actual}* en kilogramos:",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(OperarioSitio1State.peso_lechon)
+        return
+    
+    if "1" in texto or "confirmar" in texto:
+        data = await state.get_data()
+        peso = data.get("peso_temp")
+        lechon_actual = data.get("lechon_actual")
+        
+        await message.answer(
+            f"✅ Peso confirmado: *{peso:,.2f} kg*\n\n"
+            f"📸 Ahora envíe una *foto del pesaje del lechón #{lechon_actual}*:",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(OperarioSitio1State.foto_lechon)
+        return
+    
+    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+
+@dp.message(OperarioSitio1State.foto_lechon, F.photo)
+async def procesar_foto_lechon(message: types.Message, state: FSMContext):
+    """Procesa la foto del pesaje y avanza al siguiente lechón o finaliza"""
+    data = await state.get_data()
+    peso = data.get("peso_temp")
+    lechon_actual = data.get("lechon_actual")
+    cantidad_lechones = data.get("cantidad_lechones")
+    pesos = data.get("pesos", [])
+    fotos = data.get("fotos", [])
+    
+    # Descargar foto
+    photo = message.photo[-1]
+    file = await bot.get_file(photo.file_id)
+    file_path = f"temp_lechon_{lechon_actual}_{message.from_user.id}.jpg"
+    await bot.download_file(file.file_path, file_path)
+    
+    # Subir a Google Drive
+    foto_url = upload_to_drive(file_path, f"lechon_{lechon_actual}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg")
+    
+    # Eliminar archivo temporal
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    
+    # Guardar peso y foto
+    pesos.append(peso)
+    fotos.append(foto_url if foto_url else "Sin foto")
+    
+    await state.update_data(pesos=pesos, fotos=fotos)
+    
+    # Verificar si hay más lechones
+    if lechon_actual < cantidad_lechones:
+        siguiente = lechon_actual + 1
+        await state.update_data(lechon_actual=siguiente)
+        
+        await message.answer(
+            f"✅ Lechón #{lechon_actual} registrado\n\n"
+            f"📊 Ingrese el *peso del lechón #{siguiente}* en kilogramos:\n"
+            f"_(Progreso: {lechon_actual}/{cantidad_lechones})_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(OperarioSitio1State.peso_lechon)
+    else:
+        # Todos los lechones han sido pesados
+        await finalizar_registro_sitio1(message, state)
+
+@dp.message(OperarioSitio1State.foto_lechon)
+async def foto_lechon_invalida(message: types.Message, state: FSMContext):
+    """Handler para cuando no se envía una foto"""
+    data = await state.get_data()
+    lechon_actual = data.get("lechon_actual")
+    await message.answer(
+        f"⚠️ Por favor envíe una *foto* del pesaje del lechón #{lechon_actual}.\n\n"
+        f"_(No se aceptan archivos de texto)_",
+        parse_mode="Markdown"
+    )
+
+async def finalizar_registro_sitio1(message: types.Message, state: FSMContext):
+    """Finaliza el registro y envía resumen"""
+    data = await state.get_data()
+    
+    cedula = data.get("cedula")
+    telegram_id = data.get("telegram_id")
+    cantidad_lechones = data.get("cantidad_lechones")
+    pesos = data.get("pesos", [])
+    fotos = data.get("fotos", [])
+    
+    # Calcular estadísticas
+    peso_total = sum(pesos)
+    peso_promedio = peso_total / len(pesos) if pesos else 0
+    
+    # Guardar en base de datos
+    await guardar_registro_sitio1(data)
+    
+    # Enviar notificación al grupo
+    await enviar_notificacion_grupo_sitio1(data, peso_total, peso_promedio)
+    
+    # Crear resumen para el usuario
+    resumen = f"✅ *REGISTRO COMPLETADO*\n\n"
+    resumen += f"👤 Cédula: *{cedula}*\n"
+    resumen += f"🐷 Lechones pesados: *{cantidad_lechones}*\n"
+    resumen += f"⚖️ Peso total: *{peso_total:,.2f} kg*\n"
+    resumen += f"📊 Peso promedio: *{peso_promedio:,.2f} kg/lechón*\n\n"
+    resumen += f"*DETALLE POR LECHÓN:*\n\n"
+    
+    for i, peso in enumerate(pesos, 1):
+        resumen += f"Lechón #{i}: {peso:,.2f} kg\n"
+    
+    await message.answer(resumen, parse_mode="Markdown")
+    await message.answer("Volviendo al menú principal...")
+    await volver_menu_principal(message, state)
+
+async def guardar_registro_sitio1(data: dict):
+    """Guarda el registro en la base de datos"""
+    conn = None
+    try:
+        conn = await get_db_connection()
+        if not conn:
+            print("⚠️ No se pudo conectar a la base de datos")
+            return
+        
+        # Crear tabla si no existe
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS operario_fijo_granja (
+                id SERIAL PRIMARY KEY,
+                telegram_id BIGINT NOT NULL,
+                cedula VARCHAR(20) NOT NULL,
+                cantidad_lechones INTEGER NOT NULL,
+                peso_total DECIMAL(10, 2) NOT NULL,
+                peso_promedio DECIMAL(10, 2) NOT NULL,
+                pesos_detalle TEXT,
+                fotos_urls TEXT,
+                fecha TIMESTAMP DEFAULT NOW()
+            )
+        ''')
+        
+        pesos = data.get("pesos", [])
+        fotos = data.get("fotos", [])
+        peso_total = sum(pesos)
+        peso_promedio = peso_total / len(pesos) if pesos else 0
+        
+        # Convertir listas a strings JSON
+        import json
+        pesos_json = json.dumps(pesos)
+        fotos_json = json.dumps(fotos)
+        
+        # Insertar registro
+        await conn.execute('''
+            INSERT INTO operario_fijo_granja (
+                telegram_id, cedula, cantidad_lechones, peso_total, peso_promedio,
+                pesos_detalle, fotos_urls
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ''',
+            data.get('telegram_id'),
+            data.get('cedula'),
+            data.get('cantidad_lechones'),
+            peso_total,
+            peso_promedio,
+            pesos_json,
+            fotos_json
+        )
+        
+        print("✅ Registro de Sitio 1 guardado en base de datos")
+    except Exception as e:
+        print(f"⚠️ Error guardando en base de datos: {e}")
+    finally:
+        if conn:
+            await release_db_connection(conn)
+
+async def enviar_notificacion_grupo_sitio1(data: dict, peso_total: float, peso_promedio: float):
+    """Envía notificación al grupo de Telegram"""
+    if not GROUP_CHAT_ID:
+        print("⚠️ GROUP_CHAT_ID no configurado. No se enviará notificación.")
+        return
+    
+    try:
+        pesos = data.get("pesos", [])
+        fotos = data.get("fotos", [])
+        
+        # Crear mensaje
+        mensaje = "🐷 *NUEVO REGISTRO - OPERARIO SITIO 1*\n\n"
+        
+        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
+        mensaje += f"📅 Fecha: {timestamp}\n\n"
+        
+        mensaje += f"👤 Cédula: *{data.get('cedula')}*\n"
+        mensaje += f"🐷 Cantidad de lechones: *{data.get('cantidad_lechones')}*\n"
+        mensaje += f"⚖️ Peso total: *{peso_total:,.2f} kg*\n"
+        mensaje += f"📊 Peso promedio: *{peso_promedio:,.2f} kg/lechón*\n\n"
+        
+        mensaje += "*DETALLE POR LECHÓN:*\n"
+        for i, peso in enumerate(pesos, 1):
+            mensaje += f"Lechón #{i}: {peso:,.2f} kg"
+            if i < len(fotos) and fotos[i-1] and fotos[i-1] != "Sin foto":
+                mensaje += f" - [Ver foto]({fotos[i-1]})"
+            mensaje += "\n"
+        
+        # Enviar mensaje
+        await bot.send_message(
+            chat_id=GROUP_CHAT_ID,
+            text=mensaje,
+            parse_mode="Markdown"
+        )
+        
+        print("✅ Notificación de Sitio 1 enviada al grupo")
+        
+    except Exception as e:
+        print(f"⚠️ Error enviando notificación al grupo: {e}")
 
 # ==================== OPERARIO SITIO 3 - SUBMENÚ ==================== #
 @dp.message(RegistroState.sitio3_menu, F.text == "1")
@@ -2137,14 +3585,7 @@ async def mostrar_capacidad_silo(message: types.Message, state: FSMContext):
             await release_db_connection(conn)
     
     # Volver al menú principal
-    await message.answer(
-        "\n¿Desea hacer algo más?\n\n"
-        "1️⃣ Registrar Pesaje\n"
-        "2️⃣ Consultar Capacidad de Silos\n"
-        "3️⃣ Restar Peso de Silo\n\n"
-        "Escriba el número de la opción:"
-    )
-    await state.set_state(RegistroState.menu_principal)
+    await volver_menu_principal(message, state)
 
 # ==================== RESTAR PESO DE SILO ==================== #
 @dp.message(RegistroState.restar_silo_numero)
@@ -2214,14 +3655,7 @@ async def restar_peso_del_silo(message: types.Message, state: FSMContext):
             await release_db_connection(conn)
     
     # Volver al menú principal
-    await message.answer(
-        "\n¿Desea hacer algo más?\n\n"
-        "1️⃣ Registrar Pesaje\n"
-        "2️⃣ Consultar Capacidad de Silos\n"
-        "3️⃣ Restar Peso de Silo\n\n"
-        "Escriba el número de la opción:"
-    )
-    await state.set_state(RegistroState.menu_principal)
+    await volver_menu_principal(message, state)
 
 @dp.message(RegistroState.confirmar_restar_peso, F.text == "2")
 async def editar_restar_peso(message: types.Message, state: FSMContext):
@@ -2869,14 +4303,7 @@ async def guardar_registro(message: types.Message, state: FSMContext):
                     print(f"⚠️ Error al enviar mensaje de texto al grupo: {e2}")
         
         # Volver al menú principal
-        await message.answer(
-            "\n¿Desea hacer algo más?\n\n"
-            "1️⃣ Registrar Pesaje\n"
-            "2️⃣ Consultar Capacidad de Silos\n"
-            "3️⃣ Restar Peso de Silo\n\n"
-            "Escriba el número de la opción:"
-        )
-        await state.set_state(RegistroState.menu_principal)
+        await volver_menu_principal(message, state)
         
     except Exception as e:
         print(f"❌ Error en guardar_registro: {e}")
