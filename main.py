@@ -11,7 +11,7 @@ from aiogram.filters import CommandStart
 from aiogram.utils.keyboard import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardBuilder
 from aiogram.types import ReplyKeyboardRemove
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Librerías para Google Drive
 from googleapiclient.discovery import build
@@ -517,7 +517,7 @@ def validar_peso_toneladas(valor: str) -> tuple[bool, float, str]:
 
 async def verificar_multiples_cedulas(telegram_user_id: int, cedula_actual: str) -> tuple[bool, list[str]]:
     """
-    Verifica si un telegram_user_id ha usado diferentes cédulas previamente.
+    Verifica si un telegram_user_id ha usado diferentes cédulas previamente en TODAS las tablas.
 
     Args:
         telegram_user_id: ID del usuario de Telegram
@@ -535,7 +535,7 @@ async def verificar_multiples_cedulas(telegram_user_id: int, cedula_actual: str)
             print("⚠️ No se pudo verificar múltiples cédulas (sin conexión a BD)")
             return False, []
 
-        # Consultar en tabla de Registro de Animales
+        # Consultar en tabla de Registro de Animales (Sitio 3)
         registros_animales = await conn.fetch('''
             SELECT DISTINCT cedula_operario
             FROM operario_sitio3_animales
@@ -546,7 +546,7 @@ async def verificar_multiples_cedulas(telegram_user_id: int, cedula_actual: str)
         for reg in registros_animales:
             cedulas_encontradas.add(reg['cedula_operario'])
 
-        # Consultar en tabla de Descarga de Animales
+        # Consultar en tabla de Descarga de Animales (Sitio 3)
         registros_descarga = await conn.fetch('''
             SELECT DISTINCT cedula_operario
             FROM operario_sitio3_descarga_animales
@@ -556,6 +556,34 @@ async def verificar_multiples_cedulas(telegram_user_id: int, cedula_actual: str)
 
         for reg in registros_descarga:
             cedulas_encontradas.add(reg['cedula_operario'])
+
+        # Consultar en tabla de Conductores
+        try:
+            registros_conductores = await conn.fetch('''
+                SELECT DISTINCT cedula
+                FROM conductores
+                WHERE telegram_user_id = $1
+                AND cedula != $2
+            ''', telegram_user_id, cedula_actual)
+
+            for reg in registros_conductores:
+                cedulas_encontradas.add(reg['cedula'])
+        except Exception as e:
+            print(f"⚠️ Tabla conductores no existe o error: {e}")
+
+        # Consultar en tabla de Operario Sitio 1 (Granja)
+        try:
+            registros_sitio1 = await conn.fetch('''
+                SELECT DISTINCT cedula
+                FROM operario_fijo_granja
+                WHERE telegram_user_id = $1
+                AND cedula != $2
+            ''', telegram_user_id, cedula_actual)
+
+            for reg in registros_sitio1:
+                cedulas_encontradas.add(reg['cedula'])
+        except Exception as e:
+            print(f"⚠️ Tabla operario_fijo_granja no existe o error: {e}")
 
         # Si encontramos otras cédulas, hay alerta
         if cedulas_encontradas:
@@ -664,10 +692,192 @@ async def volver_menu_sitio3(message: types.Message, state: FSMContext):
     )
     await state.set_state(RegistroState.sitio3_menu)
 
+async def finalizar_flujo(message: types.Message, state: FSMContext):
+    """Función para finalizar el flujo y despedir al usuario (NO vuelve al menú)"""
+    await state.clear()
+    await message.answer(
+        "✅ *FINALIZADO*\n\n"
+        "Has acabado el flujo y el registro fue exitoso.\n\n"
+        "En caso de volver a querer usar el bot, escriba:\n"
+        "/start\n\n"
+        "Si no, ¡hasta luego!\n\n"
+        "🙏 *MUCHAS GRACIAS*",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
 # ==================== CONFIGURAR BOT ==================== #
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+
+# ==================== SISTEMA DE TIMEOUT DE INACTIVIDAD ==================== #
+# Diccionario para rastrear la última actividad de cada usuario
+user_last_activity = {}
+TIMEOUT_MINUTES = 20
+
+async def guardar_registro_inactivo(user_id: int, state_name: str, data: dict):
+    """Guarda un registro parcial en la base de datos con estado INACTIVO"""
+    conn = None
+    try:
+        conn = await get_db_connection()
+        if not conn:
+            print(f"⚠️ No se pudo guardar registro inactivo para user {user_id}")
+            return
+
+        # Determinar en qué tabla guardar según el estado
+        fecha_hora = datetime.now()
+
+        if "ConductoresState" in state_name:
+            # Guardar en tabla conductores con estado INACTIVO
+            await conn.execute('''
+                INSERT INTO conductores (
+                    telegram_id, cedula, placa, tipo_carga, num_animales, tipo_combustible,
+                    cantidad_galones, factura_dato1, factura_dato2, factura_dato3,
+                    factura_foto, bascula, cerdos_vivos, cerdos_muertos, peso, foto_pesaje, fecha
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            ''',
+                user_id,
+                data.get('cedula', 'INACTIVO'),
+                data.get('placa', 'INACTIVO'),
+                data.get('tipo_carga', 'INACTIVO'),
+                data.get('num_animales'),
+                data.get('tipo_combustible'),
+                data.get('cantidad_galones'),
+                data.get('numero_factura'),
+                data.get('tipo_alimento'),
+                data.get('kilos_comprados'),
+                data.get('factura_foto'),
+                data.get('bascula', 'INACTIVO'),
+                data.get('cerdos_vivos'),
+                data.get('cerdos_muertos'),
+                data.get('peso', 0.0),
+                data.get('foto_pesaje'),
+                fecha_hora
+            )
+            print(f"✅ Registro INACTIVO guardado en conductores para user {user_id}")
+
+        elif "OperarioSitio1State" in state_name:
+            # Guardar en tabla operario_fijo_granja
+            import json
+            pesos = data.get("pesos", [])
+            fotos = data.get("fotos", [])
+            peso_total = sum(pesos) if pesos else 0
+            peso_promedio = peso_total / len(pesos) if pesos else 0
+
+            await conn.execute('''
+                INSERT INTO operario_fijo_granja (
+                    telegram_id, cedula, cantidad_lechones, peso_total, peso_promedio,
+                    pesos_detalle, fotos_urls, fecha
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ''',
+                user_id,
+                data.get('cedula', 'INACTIVO'),
+                data.get('cantidad_lechones', 0),
+                peso_total,
+                peso_promedio,
+                json.dumps(pesos),
+                json.dumps(fotos),
+                fecha_hora
+            )
+            print(f"✅ Registro INACTIVO guardado en operario_fijo_granja para user {user_id}")
+
+        elif "sitio3" in state_name.lower() or "RegistroState" in state_name:
+            # Para Sitio 3, guardar según el tipo de operación
+            if "medicion" in state_name.lower():
+                await conn.execute('''
+                    INSERT INTO operario_sitio3_medicion_silos (
+                        cedula_operario, silos_medidos, tipo_comida, peso_antes, imagen_antes,
+                        peso_despues, imagen_despues, diferencia, fecha_registro, session_id, telegram_user_id
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                ''',
+                    data.get('medicion_cedula', 'INACTIVO'),
+                    data.get('medicion_silos_seleccionados', 'INACTIVO'),
+                    data.get('medicion_tipo_comida', 'INACTIVO'),
+                    data.get('medicion_peso_antes'),
+                    data.get('medicion_imagen_antes'),
+                    data.get('medicion_peso_despues'),
+                    data.get('medicion_imagen_despues'),
+                    0.0,
+                    fecha_hora,
+                    data.get('medicion_session_id', str(uuid.uuid4())),
+                    user_id
+                )
+            else:
+                # Registro de animales o descarga
+                await conn.execute('''
+                    INSERT INTO operario_sitio3_animales (
+                        cedula_operario, cantidad_animales, rango_corrales, tipo_comida,
+                        fecha_registro, session_id, telegram_user_id
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ''',
+                    data.get('sitio3_cedula', 'INACTIVO'),
+                    data.get('sitio3_cantidad_animales', 0),
+                    data.get('sitio3_rango_corrales', 'INACTIVO'),
+                    data.get('sitio3_tipo_comida', 'INACTIVO'),
+                    fecha_hora,
+                    data.get('session_id', str(uuid.uuid4())),
+                    user_id
+                )
+            print(f"✅ Registro INACTIVO guardado en Sitio 3 para user {user_id}")
+
+    except Exception as e:
+        print(f"⚠️ Error guardando registro inactivo: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        if conn:
+            await release_db_connection(conn)
+
+@dp.update.middleware()
+async def timeout_middleware(handler, event, data):
+    """Middleware para detectar inactividad de 20 minutos"""
+    # Solo aplicar a mensajes de usuarios
+    if hasattr(event, 'from_user') and event.from_user:
+        user_id = event.from_user.id
+        current_time = datetime.now()
+
+        # Verificar si el usuario tiene actividad previa
+        if user_id in user_last_activity:
+            last_activity = user_last_activity[user_id]
+            time_diff = current_time - last_activity
+
+            # Si han pasado más de 20 minutos
+            if time_diff > timedelta(minutes=TIMEOUT_MINUTES):
+                state = data.get("state")
+                if state:
+                    current_state = await state.get_state()
+
+                    # Solo guardar si hay un estado activo (no en menú principal)
+                    if current_state and current_state != "RegistroState:menu_principal":
+                        state_data = await state.get_data()
+
+                        # Guardar registro parcial
+                        await guardar_registro_inactivo(user_id, current_state, state_data)
+
+                        # Notificar al usuario
+                        await event.answer(
+                            "⏱️ *SESIÓN EXPIRADA POR INACTIVIDAD*\n\n"
+                            "Han pasado más de 20 minutos sin actividad.\n"
+                            "Su progreso ha sido guardado como INACTIVO.\n\n"
+                            "Para comenzar de nuevo, use /start",
+                            parse_mode="Markdown"
+                        )
+
+                        # Limpiar el estado
+                        await state.clear()
+
+                        # Remover del diccionario
+                        del user_last_activity[user_id]
+
+                        # No continuar con el handler
+                        return
+
+        # Actualizar última actividad
+        user_last_activity[user_id] = current_time
+
+    # Continuar con el handler normal
+    return await handler(event, data)
 
 # ==================== HANDLER GLOBAL PARA CANCELAR ==================== #
 @dp.message(F.text == "0")
@@ -738,10 +948,16 @@ async def preguntar_confirmacion(message: types.Message, valor: str, campo: str)
     keyboard.button(text="1. Confirmar")
     keyboard.button(text="2. Modificar")
     keyboard.adjust(2)
-    
+
+    # Mensaje específico para báscula (es un botón, no texto escrito)
+    if campo.lower() == "báscula":
+        pregunta = "¿Está seguro que es la ubicación que quiere ingresar?"
+    else:
+        pregunta = "¿Está seguro que está correctamente escrito?"
+
     await message.answer(
         f"Usted ingresó: *{valor}*\n\n"
-        f"¿Está seguro que está correctamente escrito?\n\n"
+        f"{pregunta}\n\n"
         f"1️⃣ Confirmar\n"
         f"2️⃣ Modificar",
         reply_markup=keyboard.as_markup(resize_keyboard=True),
@@ -753,44 +969,74 @@ async def preguntar_confirmacion(message: types.Message, valor: str, campo: str)
 async def procesar_cedula_conductor(message: types.Message, state: FSMContext):
     """Recibe y valida la cédula del conductor"""
     cedula = message.text.strip()
-    
-    if not validar_cedula(cedula):
-        await message.answer("⚠️ Cédula inválida. Debe contener solo números.\n\nIntente nuevamente:")
+
+    if not validar_cedula_sitio3(cedula):
+        await message.answer(
+            "⚠️ Cédula inválida.\n\n"
+            "Debe contener solo números y tener entre 6 y 12 dígitos.\n\n"
+            "Por favor, intente nuevamente:"
+        )
         return
-    
-    await state.update_data(cedula_temp=cedula)
-    await preguntar_confirmacion(message, cedula, "cédula")
+
+    await state.update_data(cedula=cedula)
+    await message.answer(
+        f"📋 Cédula ingresada: *{cedula}*\n\n"
+        "¿Es correcta?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
     await state.set_state(ConductoresState.confirmar_cedula)
 
+@dp.message(ConductoresState.confirmar_cedula, F.text == "1")
+async def confirmar_cedula_conductor_si(message: types.Message, state: FSMContext):
+    """Confirma la cédula y verifica múltiples cédulas"""
+    data = await state.get_data()
+    cedula = data.get('cedula')
+    telegram_user_id = message.from_user.id
+
+    # Verificar si hay múltiples cédulas (alerta de seguridad)
+    hay_alerta, cedulas_previas = await verificar_multiples_cedulas(telegram_user_id, cedula)
+
+    if hay_alerta:
+        username = message.from_user.username or message.from_user.full_name or "Desconocido"
+        await enviar_alerta_seguridad(
+            telegram_user_id=telegram_user_id,
+            username=username,
+            cedula_actual=cedula,
+            cedulas_previas=cedulas_previas,
+            tipo_operacion="Conductores"
+        )
+
+    await message.answer(
+        f"✅ Cédula: *{cedula}*\n\n"
+        f"Ahora, ingrese la *placa del camión*:\n"
+        f"_(Formato: 3 letras + 3 números, ejemplo: NHU982)_",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="Markdown"
+    )
+    await state.set_state(ConductoresState.placa)
+
+@dp.message(ConductoresState.confirmar_cedula, F.text == "2")
+async def confirmar_cedula_conductor_no(message: types.Message, state: FSMContext):
+    """Permite editar la cédula"""
+    await message.answer(
+        "Por favor, ingrese nuevamente su *cédula*:",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="Markdown"
+    )
+    await state.set_state(ConductoresState.cedula)
+
 @dp.message(ConductoresState.confirmar_cedula)
-async def confirmar_cedula_conductor(message: types.Message, state: FSMContext):
-    """Confirma la cédula o permite modificarla"""
-    texto = message.text.strip().lower()
-    
-    if "2" in texto or "modificar" in texto:
-        await message.answer(
-            "Por favor, ingrese nuevamente su *cédula*:",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(ConductoresState.cedula)
-        return
-    
-    if "1" in texto or "confirmar" in texto:
-        data = await state.get_data()
-        cedula = data.get("cedula_temp")
-        await state.update_data(cedula=cedula)
-        
-        await message.answer(
-            f"✅ Cédula: *{cedula}*\n\n"
-            f"Ahora, ingrese la *placa del camión*:\n"
-            f"_(Formato: 3 letras + 3 números, ejemplo: NHU982)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(ConductoresState.placa)
-    else:
-        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+async def confirmar_cedula_conductor_invalido(message: types.Message, state: FSMContext):
+    """Maneja respuesta inválida en confirmación"""
+    await message.answer(
+        "⚠️ Opción no válida.\n\n"
+        "Por favor escriba:\n"
+        "1️⃣ para confirmar\n"
+        "2️⃣ para editar"
+    )
 
 # 2. PLACA
 @dp.message(ConductoresState.placa)
@@ -1680,13 +1926,12 @@ async def guardar_registro_conductor(message: types.Message, state: FSMContext, 
     # Confirmar al usuario
     await message.answer(
         "✅ *REGISTRO COMPLETADO EXITOSAMENTE*\n\n"
-        "Su pesaje ha sido registrado correctamente.\n\n"
-        "Volviendo al menú principal...",
+        "Su pesaje ha sido registrado correctamente.",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
-    
-    await volver_menu_principal(message, state)
+
+    await finalizar_flujo(message, state)
 
 async def enviar_notificacion_grupo_conductor(data: dict):
     """Envía notificación al grupo de Telegram con la información del conductor"""
@@ -1762,45 +2007,74 @@ async def enviar_notificacion_grupo_conductor(data: dict):
 async def procesar_cedula_sitio1(message: types.Message, state: FSMContext):
     """Procesa la cédula del operario"""
     cedula = message.text.strip()
-    
-    if not validar_cedula(cedula):
-        await message.answer("⚠️ Cédula inválida. Solo números por favor.\n\nIntente nuevamente:")
+
+    if not validar_cedula_sitio3(cedula):
+        await message.answer(
+            "⚠️ Cédula inválida.\n\n"
+            "Debe contener solo números y tener entre 6 y 12 dígitos.\n\n"
+            "Por favor, intente nuevamente:"
+        )
         return
-    
-    await state.update_data(cedula_temp=cedula)
-    await preguntar_confirmacion(message, cedula, "cédula")
+
+    await state.update_data(cedula=cedula)
+    await message.answer(
+        f"📋 Cédula ingresada: *{cedula}*\n\n"
+        "¿Es correcta?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown"
+    )
     await state.set_state(OperarioSitio1State.confirmar_cedula)
 
+@dp.message(OperarioSitio1State.confirmar_cedula, F.text == "1")
+async def confirmar_cedula_sitio1_si(message: types.Message, state: FSMContext):
+    """Confirma la cédula y verifica múltiples cédulas"""
+    data = await state.get_data()
+    cedula = data.get('cedula')
+    telegram_user_id = message.from_user.id
+
+    # Verificar si hay múltiples cédulas (alerta de seguridad)
+    hay_alerta, cedulas_previas = await verificar_multiples_cedulas(telegram_user_id, cedula)
+
+    if hay_alerta:
+        username = message.from_user.username or message.from_user.full_name or "Desconocido"
+        await enviar_alerta_seguridad(
+            telegram_user_id=telegram_user_id,
+            username=username,
+            cedula_actual=cedula,
+            cedulas_previas=cedulas_previas,
+            tipo_operacion="Operario Sitio 1"
+        )
+
+    await message.answer(
+        f"✅ Cédula: *{cedula}*\n\n"
+        f"¿Cuántos *lechones* va a pesar?\n"
+        f"_(Ingrese un número)_",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="Markdown"
+    )
+    await state.set_state(OperarioSitio1State.cantidad_lechones)
+
+@dp.message(OperarioSitio1State.confirmar_cedula, F.text == "2")
+async def confirmar_cedula_sitio1_no(message: types.Message, state: FSMContext):
+    """Permite editar la cédula"""
+    await message.answer(
+        "Por favor, ingrese nuevamente su *cédula*:",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="Markdown"
+    )
+    await state.set_state(OperarioSitio1State.cedula)
+
 @dp.message(OperarioSitio1State.confirmar_cedula)
-async def confirmar_cedula_sitio1(message: types.Message, state: FSMContext):
-    """Confirma la cédula o permite modificarla"""
-    texto = message.text.strip().lower()
-    
-    if "2" in texto or "modificar" in texto:
-        await message.answer(
-            "Por favor, ingrese nuevamente su *cédula*:",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(OperarioSitio1State.cedula)
-        return
-    
-    if "1" in texto or "confirmar" in texto:
-        data = await state.get_data()
-        cedula = data.get("cedula_temp")
-        await state.update_data(cedula=cedula)
-        
-        await message.answer(
-            f"✅ Cédula: *{cedula}*\n\n"
-            f"¿Cuántos *lechones* va a pesar?\n"
-            f"_(Ingrese un número)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(OperarioSitio1State.cantidad_lechones)
-        return
-    
-    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+async def confirmar_cedula_sitio1_invalido(message: types.Message, state: FSMContext):
+    """Maneja respuesta inválida en confirmación"""
+    await message.answer(
+        "⚠️ Opción no válida.\n\n"
+        "Por favor escriba:\n"
+        "1️⃣ para confirmar\n"
+        "2️⃣ para editar"
+    )
 
 @dp.message(OperarioSitio1State.cantidad_lechones)
 async def procesar_cantidad_lechones(message: types.Message, state: FSMContext):
@@ -1992,8 +2266,7 @@ async def finalizar_registro_sitio1(message: types.Message, state: FSMContext):
         resumen += f"Lechón #{i}: {peso:,.2f} kg\n"
     
     await message.answer(resumen, parse_mode="Markdown")
-    await message.answer("Volviendo al menú principal...")
-    await volver_menu_principal(message, state)
+    await finalizar_flujo(message, state)
 
 async def guardar_registro_sitio1(data: dict):
     """Guarda el registro en la base de datos"""
@@ -2522,9 +2795,9 @@ async def sitio3_terminar_registro(message: types.Message, state: FSMContext):
 
     await message.answer(resumen_usuario, parse_mode="Markdown")
 
-    # Volver al menú principal
+    # Finalizar flujo
     await asyncio.sleep(1)
-    await volver_menu_principal(message, state)
+    await finalizar_flujo(message, state)
 
 @dp.message(RegistroState.sitio3_agregar_mas)
 async def sitio3_agregar_mas_invalido(message: types.Message, state: FSMContext):
@@ -2857,9 +3130,9 @@ async def descarga_confirmar_lote_si(message: types.Message, state: FSMContext):
 
     await message.answer(resumen_usuario, parse_mode="Markdown")
 
-    # Volver al menú principal
+    # Finalizar flujo
     await asyncio.sleep(1)
-    await volver_menu_principal(message, state)
+    await finalizar_flujo(message, state)
 
 @dp.message(RegistroState.descarga_confirmar_lote, F.text == "2")
 async def descarga_confirmar_lote_no(message: types.Message, state: FSMContext):
@@ -3518,9 +3791,9 @@ async def medicion_finalizar_registro(message: types.Message, state: FSMContext)
 
     await message.answer(resumen_usuario, parse_mode="Markdown")
 
-    # Volver al menú principal
+    # Finalizar flujo
     await asyncio.sleep(1)
-    await volver_menu_principal(message, state)
+    await finalizar_flujo(message, state)
 
 @dp.message(RegistroState.medicion_agregar_mas)
 async def medicion_agregar_mas_invalido(message: types.Message, state: FSMContext):
@@ -3583,9 +3856,9 @@ async def mostrar_capacidad_silo(message: types.Message, state: FSMContext):
     finally:
         if conn:
             await release_db_connection(conn)
-    
-    # Volver al menú principal
-    await volver_menu_principal(message, state)
+
+    # Finalizar flujo de consulta
+    await finalizar_flujo(message, state)
 
 # ==================== RESTAR PESO DE SILO ==================== #
 @dp.message(RegistroState.restar_silo_numero)
@@ -3644,7 +3917,7 @@ async def restar_peso_del_silo(message: types.Message, state: FSMContext):
                 f"✅ Se restaron {peso_a_restar} kg del Silo {silo_numero}\n\n"
                 f"📦 Capacidad actual del Silo {silo_numero}: {total_actual:.1f} kg"
             )
-            
+
     except Exception as e:
         print(f"⚠️ Error restando peso: {e}")
         import traceback
@@ -3653,9 +3926,9 @@ async def restar_peso_del_silo(message: types.Message, state: FSMContext):
     finally:
         if conn:
             await release_db_connection(conn)
-    
-    # Volver al menú principal
-    await volver_menu_principal(message, state)
+
+    # Finalizar flujo
+    await finalizar_flujo(message, state)
 
 @dp.message(RegistroState.confirmar_restar_peso, F.text == "2")
 async def editar_restar_peso(message: types.Message, state: FSMContext):
@@ -4301,10 +4574,10 @@ async def guardar_registro(message: types.Message, state: FSMContext):
                     print("✅ Notificación enviada al grupo (solo texto)")
                 except Exception as e2:
                     print(f"⚠️ Error al enviar mensaje de texto al grupo: {e2}")
-        
-        # Volver al menú principal
-        await volver_menu_principal(message, state)
-        
+
+        # Finalizar flujo
+        await finalizar_flujo(message, state)
+
     except Exception as e:
         print(f"❌ Error en guardar_registro: {e}")
         await message.answer(f"❌ Error procesando el registro: {e}\nIntente nuevamente con /start")
