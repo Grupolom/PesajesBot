@@ -917,6 +917,21 @@ async def start(message: types.Message, state: FSMContext):
 
 # ==================== COMANDOS DE REPORTES/CONSULTAS ==================== #
 
+def formatear_fecha(fecha_obj):
+    """Helper para formatear fechas que pueden ser datetime o string"""
+    try:
+        if fecha_obj:
+            # Si es datetime, usar strftime
+            if hasattr(fecha_obj, 'strftime'):
+                return fecha_obj.strftime('%d/%m %H:%M')
+            else:
+                # Si es string, retornar directamente
+                return str(fecha_obj)
+        return "Sin fecha"
+    except Exception as e:
+        print(f"Error formateando fecha: {e}")
+        return "Error en fecha"
+
 @dp.message(Command("ayuda"))
 async def ayuda(message: types.Message):
     """Muestra todos los comandos disponibles"""
@@ -1068,21 +1083,21 @@ async def reporte_cedula(message: types.Message):
         if sitio3_animales:
             mensaje += f"🐷 *SITIO 3 - ANIMALES* (últimos {len(sitio3_animales)})\n"
             for reg in sitio3_animales:
-                fecha = reg['fecha_registro'].strftime('%d/%m %H:%M')
+                fecha = formatear_fecha(reg['fecha_registro'])
                 mensaje += f"• {fecha} | Banda: {reg['bandas']} | Corrales: {reg['rango_corrales']}\n"
             mensaje += "\n"
 
         if sitio1:
             mensaje += f"🐷 *SITIO 1 - LECHONES* (últimos {len(sitio1)})\n"
             for reg in sitio1:
-                fecha = reg['fecha'].strftime('%d/%m %H:%M')
+                fecha = formatear_fecha(reg['fecha'])
                 mensaje += f"• {fecha} | {reg['cantidad_lechones']} lechones | {reg['peso_total']:.2f} kg\n"
             mensaje += "\n"
 
         if conductores:
             mensaje += f"🚛 *CONDUCTORES* (últimos {len(conductores)})\n"
             for reg in conductores:
-                fecha = reg['fecha'].strftime('%d/%m %H:%M')
+                fecha = formatear_fecha(reg['fecha'])
                 mensaje += f"• {fecha} | {reg['placa']} | {reg['tipo_carga']}\n"
             mensaje += "\n"
 
@@ -1118,7 +1133,7 @@ async def reporte_sitio3(message: types.Message):
 
         if registros:
             for i, reg in enumerate(registros, 1):
-                fecha = reg['fecha_registro'].strftime('%d/%m %H:%M')
+                fecha = formatear_fecha(reg['fecha_registro'])
                 mensaje += (
                     f"{i}. {fecha}\n"
                     f"   • Cédula: {reg['cedula_operario']}\n"
@@ -1136,6 +1151,8 @@ async def reporte_sitio3(message: types.Message):
     except Exception as e:
         await message.answer(f"⚠️ Error al generar reporte: {e}")
         print(f"Error en reporte_sitio3: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         if conn:
             await release_db_connection(conn)
