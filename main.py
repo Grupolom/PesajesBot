@@ -316,12 +316,16 @@ class OperarioSitio1State(StatesGroup):
     """Estados para el menú de Operario Sitio 1 (Granja)"""
     cedula = State()
     confirmar_cedula = State()
-    
+
     cantidad_lechones = State()
     confirmar_cantidad = State()
-    
+
+    # NUEVO: Estados para agrupación
+    agrupacion_lechones = State()  # Normal (5) o Otro
+    cantidad_por_grupo = State()  # Si eligió "Otro", cuántos por grupo
+
     # Estados para el loop de pesaje
-    peso_lechon = State()  # Peso del lechón actual
+    peso_lechon = State()  # Peso del lechón actual (ahora grupo)
     confirmar_peso = State()  # Confirmar peso del lechón
     foto_lechon = State()  # Foto del pesaje
 
@@ -2134,86 +2138,199 @@ async def confirmar_cantidad_lechones(message: types.Message, state: FSMContext)
     if "1" in texto or "confirmar" in texto:
         data = await state.get_data()
         cantidad = data.get("cantidad_lechones_temp")
-        await state.update_data(
-            cantidad_lechones=cantidad,
-            lechon_actual=1,  # Empezar con el primer lechón
-            pesos=[],  # Lista para almacenar pesos
-            fotos=[]   # Lista para almacenar fotos
-        )
-        
+        await state.update_data(cantidad_lechones=cantidad)
+
+        # NUEVO: Preguntar por agrupación
+        builder = ReplyKeyboardBuilder()
+        builder.button(text="Normal (5)")
+        builder.button(text="Otro")
+        builder.adjust(2)
+
         await message.answer(
             f"✅ Cantidad: *{cantidad} lechones*\n\n"
-            f"📊 Ingrese el *peso del lechón #1* en kilogramos:\n"
-            f"_(Ejemplo: 25.5 o 30)_",
-            reply_markup=ReplyKeyboardRemove(),
+            f"Normalmente se pesa en el corredor de lechones de a 5.\n\n"
+            f"¿Quiere pesarlos de a 5 lechones o agruparlos de otra manera?",
+            reply_markup=builder.as_markup(resize_keyboard=True),
             parse_mode="Markdown"
         )
-        await state.set_state(OperarioSitio1State.peso_lechon)
+        await state.set_state(OperarioSitio1State.agrupacion_lechones)
         return
     
     await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
-@dp.message(OperarioSitio1State.peso_lechon)
-async def procesar_peso_lechon(message: types.Message, state: FSMContext):
-    """Procesa el peso de un lechón"""
-    es_valido, peso, error = validar_galones(message.text.strip())  # Reutilizamos validador de decimales
-    
-    if not es_valido or peso <= 0 or peso > 500:
+# NUEVO: Handlers para agrupación de lechones
+@dp.message(OperarioSitio1State.agrupacion_lechones, F.text == "Normal (5)")
+async def agrupacion_normal(message: types.Message, state: FSMContext):
+    """Usuario selecciona agrupación normal de 5 lechones"""
+    data = await state.get_data()
+    cantidad_lechones = data.get("cantidad_lechones")
+
+    await state.update_data(
+        lechones_por_grupo=5,
+        grupo_actual=1,  # Empezar con el primer grupo
+        pesos=[],  # Lista para almacenar pesos
+        fotos=[],  # Lista para almacenar fotos URLs
+        fotos_locales=[]  # Lista para almacenar paths locales
+    )
+
+    # Calcular cuántos grupos habrá
+    import math
+    total_grupos = math.ceil(cantidad_lechones / 5)
+
+    await message.answer(
+        f"✅ Agrupación: *5 lechones por pesaje*\n\n"
+        f"Total de pesajes a realizar: *{total_grupos}*\n\n"
+        f"📊 Ingrese el *peso del primer pesaje (5 lechones)* en kilogramos:\n"
+        f"_(Ejemplo: 125.5 o 150)_",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="Markdown"
+    )
+    await state.set_state(OperarioSitio1State.peso_lechon)
+
+@dp.message(OperarioSitio1State.agrupacion_lechones, F.text == "Otro")
+async def agrupacion_otro(message: types.Message, state: FSMContext):
+    """Usuario quiere personalizar la agrupación"""
+    data = await state.get_data()
+    cantidad_lechones = data.get("cantidad_lechones")
+
+    await message.answer(
+        f"¿De cuántos en cuántos quiere pesarlos?\n\n"
+        f"_(Ingrese un número entre 1 y {cantidad_lechones})_",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await state.set_state(OperarioSitio1State.cantidad_por_grupo)
+
+@dp.message(OperarioSitio1State.agrupacion_lechones)
+async def agrupacion_invalida(message: types.Message, state: FSMContext):
+    """Handler para opción inválida en agrupación"""
+    await message.answer("⚠️ Por favor seleccione una opción usando los botones.")
+
+@dp.message(OperarioSitio1State.cantidad_por_grupo)
+async def procesar_cantidad_por_grupo(message: types.Message, state: FSMContext):
+    """Procesa la cantidad personalizada de lechones por grupo"""
+    data = await state.get_data()
+    cantidad_lechones = data.get("cantidad_lechones")
+
+    es_valido, cantidad_grupo, error = validar_numero_entero(
+        message.text.strip(),
+        minimo=1,
+        maximo=cantidad_lechones
+    )
+
+    if not es_valido:
         await message.answer(
-            f"⚠️ Peso inválido. Ingrese un número válido entre 0.1 y 500 kg\n\n"
+            f"⚠️ {error}\n\n"
+            f"Debe ser un número entre 1 y {cantidad_lechones}.\n\n"
             f"Intente nuevamente:"
         )
         return
-    
+
+    import math
+    total_grupos = math.ceil(cantidad_lechones / cantidad_grupo)
+
+    await state.update_data(
+        lechones_por_grupo=cantidad_grupo,
+        grupo_actual=1,
+        pesos=[],
+        fotos=[],
+        fotos_locales=[]
+    )
+
+    await message.answer(
+        f"✅ Agrupación: *{cantidad_grupo} lechones por pesaje*\n\n"
+        f"Total de pesajes a realizar: *{total_grupos}*\n\n"
+        f"📊 Ingrese el *peso del primer pesaje ({cantidad_grupo} lechones)* en kilogramos:\n"
+        f"_(Ejemplo: 125.5 o 150)_",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="Markdown"
+    )
+    await state.set_state(OperarioSitio1State.peso_lechon)
+
+@dp.message(OperarioSitio1State.peso_lechon)
+async def procesar_peso_lechon(message: types.Message, state: FSMContext):
+    """Procesa el peso de un grupo de lechones"""
+    es_valido, peso, error = validar_galones(message.text.strip())  # Reutilizamos validador de decimales
+
+    if not es_valido or peso <= 0 or peso > 5000:
+        await message.answer(
+            f"⚠️ Peso inválido. Ingrese un número válido entre 0.1 y 5000 kg\n\n"
+            f"Intente nuevamente:"
+        )
+        return
+
     data = await state.get_data()
-    lechon_actual = data.get("lechon_actual")
-    
+    grupo_actual = data.get("grupo_actual")
+    lechones_por_grupo = data.get("lechones_por_grupo")
+    cantidad_lechones = data.get("cantidad_lechones")
+
+    # Calcular cuántos lechones hay en ESTE grupo
+    lechones_pesados = (grupo_actual - 1) * lechones_por_grupo
+    lechones_en_este_grupo = min(lechones_por_grupo, cantidad_lechones - lechones_pesados)
+
     await state.update_data(peso_temp=peso)
-    await preguntar_confirmacion(message, f"{peso:,.2f} kg", f"peso del lechón #{lechon_actual}")
+    await preguntar_confirmacion(
+        message,
+        f"{peso:,.2f} kg",
+        f"peso del pesaje #{grupo_actual} ({lechones_en_este_grupo} lechones)"
+    )
     await state.set_state(OperarioSitio1State.confirmar_peso)
 
 @dp.message(OperarioSitio1State.confirmar_peso)
 async def confirmar_peso_lechon(message: types.Message, state: FSMContext):
-    """Confirma el peso del lechón o permite modificarlo"""
+    """Confirma el peso del grupo de lechones o permite modificarlo"""
     texto = message.text.strip().lower()
-    
+
     if "2" in texto or "modificar" in texto:
         data = await state.get_data()
-        lechon_actual = data.get("lechon_actual")
+        grupo_actual = data.get("grupo_actual")
+        lechones_por_grupo = data.get("lechones_por_grupo")
+        cantidad_lechones = data.get("cantidad_lechones")
+
+        # Calcular cuántos lechones hay en este grupo
+        lechones_pesados = (grupo_actual - 1) * lechones_por_grupo
+        lechones_en_este_grupo = min(lechones_por_grupo, cantidad_lechones - lechones_pesados)
+
         await message.answer(
-            f"📊 Ingrese nuevamente el *peso del lechón #{lechon_actual}* en kilogramos:",
+            f"📊 Ingrese nuevamente el *peso del pesaje #{grupo_actual} ({lechones_en_este_grupo} lechones)* en kilogramos:",
             reply_markup=ReplyKeyboardRemove(),
             parse_mode="Markdown"
         )
         await state.set_state(OperarioSitio1State.peso_lechon)
         return
-    
+
     if "1" in texto or "confirmar" in texto:
         data = await state.get_data()
         peso = data.get("peso_temp")
-        lechon_actual = data.get("lechon_actual")
-        
+        grupo_actual = data.get("grupo_actual")
+        lechones_por_grupo = data.get("lechones_por_grupo")
+        cantidad_lechones = data.get("cantidad_lechones")
+
+        # Calcular cuántos lechones hay en este grupo
+        lechones_pesados = (grupo_actual - 1) * lechones_por_grupo
+        lechones_en_este_grupo = min(lechones_por_grupo, cantidad_lechones - lechones_pesados)
+
         await message.answer(
             f"✅ Peso confirmado: *{peso:,.2f} kg*\n\n"
-            f"📸 Ahora envíe una *foto del pesaje del lechón #{lechon_actual}*:",
+            f"📸 Ahora envíe una *foto del pesaje #{grupo_actual} ({lechones_en_este_grupo} lechones)*:",
             reply_markup=ReplyKeyboardRemove(),
             parse_mode="Markdown"
         )
         await state.set_state(OperarioSitio1State.foto_lechon)
         return
-    
+
     await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
 @dp.message(OperarioSitio1State.foto_lechon, F.photo)
 async def procesar_foto_lechon(message: types.Message, state: FSMContext):
-    """Procesa la foto del pesaje y avanza al siguiente lechón o finaliza"""
+    """Procesa la foto del pesaje y avanza al siguiente grupo o finaliza"""
     data = await state.get_data()
     peso = data.get("peso_temp")
-    lechon_actual = data.get("lechon_actual")
+    grupo_actual = data.get("grupo_actual")
+    lechones_por_grupo = data.get("lechones_por_grupo")
     cantidad_lechones = data.get("cantidad_lechones")
     pesos = data.get("pesos", [])
     fotos = data.get("fotos", [])
-    fotos_locales = data.get("fotos_locales", [])  # Nuevo: guardar paths locales
+    fotos_locales = data.get("fotos_locales", [])
 
     # Descargar foto
     photo = message.photo[-1]
@@ -2223,7 +2340,7 @@ async def procesar_foto_lechon(message: types.Message, state: FSMContext):
     os.makedirs("imagenes_pesajes", exist_ok=True)
     cedula = data.get("cedula")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"sitio1_lechon{lechon_actual}_{cedula}_{timestamp}.jpg"
+    filename = f"sitio1_grupo{grupo_actual}_{cedula}_{timestamp}.jpg"
     file_path = os.path.join("imagenes_pesajes", filename)
 
     await bot.download_file(file.file_path, file_path)
@@ -2239,16 +2356,24 @@ async def procesar_foto_lechon(message: types.Message, state: FSMContext):
     fotos_locales.append(file_path)  # Siempre guardar path local
 
     await state.update_data(pesos=pesos, fotos=fotos, fotos_locales=fotos_locales)
-    
-    # Verificar si hay más lechones
-    if lechon_actual < cantidad_lechones:
-        siguiente = lechon_actual + 1
-        await state.update_data(lechon_actual=siguiente)
-        
+
+    # Calcular cuántos lechones se han pesado hasta ahora
+    import math
+    total_grupos = math.ceil(cantidad_lechones / lechones_por_grupo)
+    lechones_pesados = min((grupo_actual) * lechones_por_grupo, cantidad_lechones)
+
+    # Verificar si hay más grupos
+    if grupo_actual < total_grupos:
+        siguiente_grupo = grupo_actual + 1
+        await state.update_data(grupo_actual=siguiente_grupo)
+
+        # Calcular cuántos lechones hay en el siguiente grupo
+        lechones_en_siguiente = min(lechones_por_grupo, cantidad_lechones - lechones_pesados)
+
         await message.answer(
-            f"✅ Lechón #{lechon_actual} registrado\n\n"
-            f"📊 Ingrese el *peso del lechón #{siguiente}* en kilogramos:\n"
-            f"_(Progreso: {lechon_actual}/{cantidad_lechones})_",
+            f"✅ Pesaje #{grupo_actual} registrado\n\n"
+            f"📊 Ingrese el *peso de los siguientes ({lechones_en_siguiente} lechones)* en kilogramos:\n"
+            f"_(Progreso: {lechones_pesados}/{cantidad_lechones} lechones - Pesaje {siguiente_grupo}/{total_grupos})_",
             reply_markup=ReplyKeyboardRemove(),
             parse_mode="Markdown"
         )
@@ -2261,9 +2386,16 @@ async def procesar_foto_lechon(message: types.Message, state: FSMContext):
 async def foto_lechon_invalida(message: types.Message, state: FSMContext):
     """Handler para cuando no se envía una foto"""
     data = await state.get_data()
-    lechon_actual = data.get("lechon_actual")
+    grupo_actual = data.get("grupo_actual")
+    lechones_por_grupo = data.get("lechones_por_grupo")
+    cantidad_lechones = data.get("cantidad_lechones")
+
+    # Calcular cuántos lechones hay en este grupo
+    lechones_pesados = (grupo_actual - 1) * lechones_por_grupo
+    lechones_en_este_grupo = min(lechones_por_grupo, cantidad_lechones - lechones_pesados)
+
     await message.answer(
-        f"⚠️ Por favor envíe una *foto* del pesaje del lechón #{lechon_actual}.\n\n"
+        f"⚠️ Por favor envíe una *foto* del pesaje #{grupo_actual} ({lechones_en_este_grupo} lechones).\n\n"
         f"_(No se aceptan archivos de texto)_",
         parse_mode="Markdown"
     )
@@ -2271,34 +2403,41 @@ async def foto_lechon_invalida(message: types.Message, state: FSMContext):
 async def finalizar_registro_sitio1(message: types.Message, state: FSMContext):
     """Finaliza el registro y envía resumen"""
     data = await state.get_data()
-    
+
     cedula = data.get("cedula")
     telegram_id = data.get("telegram_id")
     cantidad_lechones = data.get("cantidad_lechones")
+    lechones_por_grupo = data.get("lechones_por_grupo")
     pesos = data.get("pesos", [])
     fotos = data.get("fotos", [])
-    
+
     # Calcular estadísticas
     peso_total = sum(pesos)
-    peso_promedio = peso_total / len(pesos) if pesos else 0
-    
+    peso_promedio_por_lechon = peso_total / cantidad_lechones if cantidad_lechones > 0 else 0
+
     # Guardar en base de datos
     await guardar_registro_sitio1(data)
-    
+
     # Enviar notificación al grupo
-    await enviar_notificacion_grupo_sitio1(data, peso_total, peso_promedio)
-    
+    await enviar_notificacion_grupo_sitio1(data, peso_total, peso_promedio_por_lechon)
+
     # Crear resumen para el usuario
     resumen = f"✅ *REGISTRO COMPLETADO*\n\n"
     resumen += f"👤 Cédula: *{cedula}*\n"
     resumen += f"🐷 Lechones pesados: *{cantidad_lechones}*\n"
+    resumen += f"📦 Agrupación: *{lechones_por_grupo} lechones por pesaje*\n"
     resumen += f"⚖️ Peso total: *{peso_total:,.2f} kg*\n"
-    resumen += f"📊 Peso promedio: *{peso_promedio:,.2f} kg/lechón*\n\n"
-    resumen += f"*DETALLE POR LECHÓN:*\n\n"
-    
+    resumen += f"📊 Peso promedio: *{peso_promedio_por_lechon:,.2f} kg/lechón*\n\n"
+    resumen += f"*DETALLE POR PESAJE:*\n\n"
+
+    import math
+    total_grupos = math.ceil(cantidad_lechones / lechones_por_grupo)
     for i, peso in enumerate(pesos, 1):
-        resumen += f"Lechón #{i}: {peso:,.2f} kg\n"
-    
+        # Calcular cuántos lechones hay en este grupo
+        lechones_pesados = (i - 1) * lechones_por_grupo
+        lechones_en_este_grupo = min(lechones_por_grupo, cantidad_lechones - lechones_pesados)
+        resumen += f"Pesaje #{i}: {peso:,.2f} kg ({lechones_en_este_grupo} lechones)\n"
+
     await message.answer(resumen, parse_mode="Markdown")
     await finalizar_flujo(message, state)
 
@@ -2318,6 +2457,7 @@ async def guardar_registro_sitio1(data: dict):
                 telegram_id BIGINT NOT NULL,
                 cedula VARCHAR(20) NOT NULL,
                 cantidad_lechones INTEGER NOT NULL,
+                lechones_por_grupo INTEGER,
                 peso_total DECIMAL(10, 2) NOT NULL,
                 peso_promedio DECIMAL(10, 2) NOT NULL,
                 pesos_detalle TEXT,
@@ -2339,13 +2479,14 @@ async def guardar_registro_sitio1(data: dict):
         # Insertar registro
         await conn.execute('''
             INSERT INTO operario_fijo_granja (
-                telegram_id, cedula, cantidad_lechones, peso_total, peso_promedio,
-                pesos_detalle, fotos_urls
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                telegram_id, cedula, cantidad_lechones, lechones_por_grupo,
+                peso_total, peso_promedio, pesos_detalle, fotos_urls
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ''',
             data.get('telegram_id'),
             data.get('cedula'),
             data.get('cantidad_lechones'),
+            data.get('lechones_por_grupo'),  # NUEVO
             peso_total,
             peso_promedio,
             pesos_json,
@@ -2368,6 +2509,8 @@ async def enviar_notificacion_grupo_sitio1(data: dict, peso_total: float, peso_p
     try:
         pesos = data.get("pesos", [])
         fotos_locales = data.get("fotos_locales", [])
+        cantidad_lechones = data.get("cantidad_lechones")
+        lechones_por_grupo = data.get("lechones_por_grupo")
 
         # Crear mensaje
         mensaje = "🐷 *NUEVO REGISTRO - OPERARIO SITIO 1*\n\n"
@@ -2376,13 +2519,19 @@ async def enviar_notificacion_grupo_sitio1(data: dict, peso_total: float, peso_p
         mensaje += f"📅 Fecha: {timestamp}\n\n"
 
         mensaje += f"👤 Cédula: *{data.get('cedula')}*\n"
-        mensaje += f"🐷 Cantidad de lechones: *{data.get('cantidad_lechones')}*\n"
+        mensaje += f"🐷 Cantidad de lechones: *{cantidad_lechones}*\n"
+        mensaje += f"📦 Agrupación: *{lechones_por_grupo} lechones por pesaje*\n"
         mensaje += f"⚖️ Peso total: *{peso_total:,.2f} kg*\n"
         mensaje += f"📊 Peso promedio: *{peso_promedio:,.2f} kg/lechón*\n\n"
 
-        mensaje += "*DETALLE POR LECHÓN:*\n"
+        mensaje += "*DETALLE POR PESAJE:*\n"
+        import math
+        total_grupos = math.ceil(cantidad_lechones / lechones_por_grupo)
         for i, peso in enumerate(pesos, 1):
-            mensaje += f"Lechón #{i}: {peso:,.2f} kg\n"
+            # Calcular cuántos lechones hay en este grupo
+            lechones_pesados = (i - 1) * lechones_por_grupo
+            lechones_en_este_grupo = min(lechones_por_grupo, cantidad_lechones - lechones_pesados)
+            mensaje += f"Pesaje #{i}: {peso:,.2f} kg ({lechones_en_este_grupo} lechones)\n"
 
         # Enviar mensaje de texto
         await bot.send_message(
@@ -2396,15 +2545,19 @@ async def enviar_notificacion_grupo_sitio1(data: dict, peso_total: float, peso_p
             for i, foto_path in enumerate(fotos_locales, 1):
                 if foto_path and os.path.exists(foto_path):
                     try:
+                        # Calcular cuántos lechones hay en este grupo
+                        lechones_pesados = (i - 1) * lechones_por_grupo
+                        lechones_en_este_grupo = min(lechones_por_grupo, cantidad_lechones - lechones_pesados)
+
                         with open(foto_path, 'rb') as photo:
                             await bot.send_photo(
                                 chat_id=GROUP_CHAT_ID,
-                                photo=types.BufferedInputFile(photo.read(), filename=f"lechon_{i}.jpg"),
-                                caption=f"📸 Lechón #{i} - {pesos[i-1]:,.2f} kg"
+                                photo=types.BufferedInputFile(photo.read(), filename=f"pesaje_{i}.jpg"),
+                                caption=f"📸 Pesaje #{i} - {pesos[i-1]:,.2f} kg ({lechones_en_este_grupo} lechones)"
                             )
-                        print(f"✅ Foto del lechón #{i} enviada al grupo")
+                        print(f"✅ Foto del pesaje #{i} enviada al grupo")
                     except Exception as e_foto:
-                        print(f"⚠️ Error enviando foto del lechón #{i}: {e_foto}")
+                        print(f"⚠️ Error enviando foto del pesaje #{i}: {e_foto}")
 
         print("✅ Notificación completa de Sitio 1 enviada al grupo")
 
