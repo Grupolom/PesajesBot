@@ -338,6 +338,9 @@ class ConductoresState(StatesGroup):
     
     cerdos_muertos = State()
     confirmar_cerdos_muertos = State()
+    
+    # Flujo Peso Vacío
+    peso_vacio_tipo_carga = State()  # Pregunta qué entregó o va a cargar
 
 # ==================== ESTADOS PARA OPERARIO SITIO 1 ==================== #
 class OperarioSitio1State(StatesGroup):
@@ -1307,9 +1310,108 @@ async def menu_conductores(message: types.Message, state: FSMContext):
     await state.clear()
     # Guardar telegram_id automáticamente
     await state.update_data(telegram_id=message.from_user.id)
+    
+    # Mostrar menú de opciones primero
+    keyboard = ReplyKeyboardBuilder()
+    keyboard.button(text="1. Lechones")
+    keyboard.button(text="2. Concentrado")
+    keyboard.button(text="3. Cerdos Gordos")
+    keyboard.button(text="4. Combustible")
+    keyboard.button(text="5. Peso Vacío")
+    keyboard.adjust(2, 2, 1)
+    
     await message.answer(
         "🚛 *CONDUCTORES - REGISTRO DE PESAJE*\n\n"
-        "Por favor, ingrese su *cédula*:",
+        "¿Qué va a transportar?\n\n"
+        "1️⃣ Lechones (cerdos pequeños)\n"
+        "2️⃣ Concentrado (alimento)\n"
+        "3️⃣ Cerdos Gordos (para venta)\n"
+        "4️⃣ Combustible (diesel/corriente)\n"
+        "5️⃣ Peso Vacío\n\n"
+        "Seleccione una opción:",
+        reply_markup=keyboard.as_markup(resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+    await state.set_state(ConductoresState.menu_conductores)
+
+# Handler para selección del menú de conductores
+@dp.message(ConductoresState.menu_conductores)
+async def procesar_menu_conductores(message: types.Message, state: FSMContext):
+    """Procesa la selección del menú de conductores"""
+    texto = message.text.strip().lower()
+    
+    # Opciones 1-4: Guardar tipo de carga y pedir cédula
+    tipo_carga = None
+    if "1" in texto or "lechon" in texto:
+        tipo_carga = "Lechones"
+    elif "2" in texto or "concentrado" in texto:
+        tipo_carga = "Concentrado"
+    elif "3" in texto or "cerdo" in texto or "gordo" in texto:
+        tipo_carga = "Cerdos Gordos"
+    elif "4" in texto or "combustible" in texto:
+        tipo_carga = "Combustible"
+    elif "5" in texto or "vac" in texto:
+        # Opción 5: Peso Vacío - flujo diferente
+        await state.update_data(tipo_carga="Peso Vacío", es_peso_vacio=True)
+        
+        keyboard = ReplyKeyboardBuilder()
+        keyboard.button(text="1. Lechones")
+        keyboard.button(text="2. Concentrado")
+        keyboard.button(text="3. Cerdos Gordos")
+        keyboard.button(text="4. Combustible")
+        keyboard.adjust(2, 2)
+        
+        await message.answer(
+            "🚛 *PESO VACÍO*\n\n"
+            "¿Qué entregó o qué va a cargar?\n\n"
+            "1️⃣ Lechones\n"
+            "2️⃣ Concentrado\n"
+            "3️⃣ Cerdos Gordos\n"
+            "4️⃣ Combustible\n\n"
+            "Seleccione una opción:",
+            reply_markup=keyboard.as_markup(resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        await state.set_state(ConductoresState.peso_vacio_tipo_carga)
+        return
+    else:
+        await message.answer("⚠️ Opción no válida. Por favor seleccione una de las opciones del menú.")
+        return
+    
+    # Para opciones 1-4: guardar tipo y pedir cédula
+    await state.update_data(tipo_carga=tipo_carga, es_peso_vacio=False)
+    await message.answer(
+        f"✅ Tipo de carga: *{tipo_carga}*\n\n"
+        f"Por favor, ingrese su *cédula*:",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="Markdown"
+    )
+    await state.set_state(ConductoresState.cedula)
+
+# Handler para Peso Vacío - selección de tipo de carga
+@dp.message(ConductoresState.peso_vacio_tipo_carga)
+async def procesar_peso_vacio_tipo_carga(message: types.Message, state: FSMContext):
+    """Procesa qué entregó o va a cargar en peso vacío"""
+    texto = message.text.strip().lower()
+    
+    tipo_carga_referencia = None
+    if "1" in texto or "lechon" in texto:
+        tipo_carga_referencia = "Lechones"
+    elif "2" in texto or "concentrado" in texto:
+        tipo_carga_referencia = "Concentrado"
+    elif "3" in texto or "cerdo" in texto or "gordo" in texto:
+        tipo_carga_referencia = "Cerdos Gordos"
+    elif "4" in texto or "combustible" in texto:
+        tipo_carga_referencia = "Combustible"
+    else:
+        await message.answer("⚠️ Opción no válida. Por favor seleccione una de las opciones.")
+        return
+    
+    await state.update_data(tipo_carga_referencia=tipo_carga_referencia)
+    await message.answer(
+        f"✅ Referencia: *{tipo_carga_referencia}*\n\n"
+        f"Por favor, ingrese su *cédula*:",
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
     await state.set_state(ConductoresState.cedula)
@@ -1449,91 +1551,36 @@ async def confirmar_placa_conductor(message: types.Message, state: FSMContext):
     if "1" in texto or "confirmar" in texto:
         data = await state.get_data()
         placa = data.get("placa_temp")
+        tipo_carga = data.get("tipo_carga")
+        es_peso_vacio = data.get("es_peso_vacio", False)
         await state.update_data(placa=placa)
         
-        # Crear teclado con opciones
-        keyboard = ReplyKeyboardBuilder()
-        keyboard.button(text="1. Lechones")
-        keyboard.button(text="2. Concentrado")
-        keyboard.button(text="3. Cerdos Gordos")
-        keyboard.button(text="4. Combustible")
-        keyboard.adjust(2, 2)
+        # Si es peso vacío, ir directamente a báscula
+        if es_peso_vacio:
+            tipo_ref = data.get("tipo_carga_referencia", "")
+            keyboard = ReplyKeyboardBuilder()
+            keyboard.button(text="1. Granja")
+            keyboard.button(text="2. Bogotá")
+            keyboard.adjust(2)
+            
+            await message.answer(
+                f"✅ Placa: *{placa}*\n\n"
+                f"📍 *SELECCIÓN DE BÁSCULA*\n\n"
+                f"¿En qué báscula se realizará el pesaje?\n\n"
+                f"1️⃣ Granja\n"
+                f"2️⃣ Bogotá\n\n"
+                f"Seleccione una opción:",
+                reply_markup=keyboard.as_markup(resize_keyboard=True),
+                parse_mode="Markdown"
+            )
+            await state.set_state(ConductoresState.bascula)
+            return
         
-        await message.answer(
-            f"✅ Placa: *{placa}*\n\n"
-            f"¿Qué va a transportar?\n\n"
-            f"1️⃣ Lechones (cerdos pequeños)\n"
-            f"2️⃣ Concentrado (alimento)\n"
-            f"3️⃣ Cerdos Gordos (para venta)\n"
-            f"4️⃣ Combustible (diesel/corriente)\n\n"
-            f"Seleccione una opción:",
-            reply_markup=keyboard.as_markup(resize_keyboard=True),
-            parse_mode="Markdown"
-        )
-        await state.set_state(ConductoresState.tipo_transporte)
-    else:
-        await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
-
-# 3. TIPO DE TRANSPORTE
-@dp.message(ConductoresState.tipo_transporte)
-async def procesar_tipo_transporte(message: types.Message, state: FSMContext):
-    """Procesa el tipo de carga a transportar"""
-    texto = message.text.strip().lower()
-    
-    # Mapear la entrada del usuario
-    tipo_carga = None
-    if "1" in texto or "lechon" in texto:
-        tipo_carga = "Lechones"
-    elif "2" in texto or "concentrado" in texto:
-        tipo_carga = "Concentrado"
-    elif "3" in texto or "cerdo" in texto or "gordo" in texto:
-        tipo_carga = "Cerdos Gordos"
-    elif "4" in texto or "combustible" in texto:
-        tipo_carga = "Combustible"
-    else:
-        await message.answer("⚠️ Opción no válida. Por favor seleccione una de las opciones del menú.")
-        return
-    
-    await state.update_data(tipo_carga_temp=tipo_carga)
-    await preguntar_confirmacion(message, tipo_carga, "tipo de transporte")
-    await state.set_state(ConductoresState.confirmar_tipo_transporte)
-
-@dp.message(ConductoresState.confirmar_tipo_transporte)
-async def confirmar_tipo_transporte(message: types.Message, state: FSMContext):
-    """Confirma el tipo de transporte o permite modificarlo"""
-    texto = message.text.strip().lower()
-    
-    if "2" in texto or "modificar" in texto:
-        # Volver a mostrar opciones
-        keyboard = ReplyKeyboardBuilder()
-        keyboard.button(text="1. Lechones")
-        keyboard.button(text="2. Concentrado")
-        keyboard.button(text="3. Cerdos Gordos")
-        keyboard.button(text="4. Combustible")
-        keyboard.adjust(2, 2)
-        
-        await message.answer(
-            "¿Qué va a transportar?\n\n"
-            "1️⃣ Lechones (cerdos pequeños)\n"
-            "2️⃣ Concentrado (alimento)\n"
-            "3️⃣ Cerdos Gordos (para venta)\n"
-            "4️⃣ Combustible (diesel/corriente)\n\n"
-            "Seleccione una opción:",
-            reply_markup=keyboard.as_markup(resize_keyboard=True)
-        )
-        await state.set_state(ConductoresState.tipo_transporte)
-        return
-    
-    if "1" in texto or "confirmar" in texto:
-        data = await state.get_data()
-        tipo_carga = data.get("tipo_carga_temp")
-        await state.update_data(tipo_carga=tipo_carga)
-    
-        # Dependiendo del tipo de carga, hacer diferentes preguntas
+        # Si NO es peso vacío, continuar con el flujo según tipo de carga
         if tipo_carga == "Lechones" or tipo_carga == "Cerdos Gordos":
             animal_tipo = "lechones" if tipo_carga == "Lechones" else "cerdos gordos"
             await message.answer(
-                f"✅ Tipo de carga: *{tipo_carga}*\n\n"
+                f"✅ Placa: *{placa}*\n\n"
                 f"¿Cuántos {animal_tipo} va a transportar?\n"
                 f"_(Ingrese solo el número)_",
                 reply_markup=ReplyKeyboardRemove(),
@@ -1548,7 +1595,7 @@ async def confirmar_tipo_transporte(message: types.Message, state: FSMContext):
             keyboard.adjust(2)
             
             await message.answer(
-                f"✅ Tipo de carga: *{tipo_carga}*\n\n"
+                f"✅ Placa: *{placa}*\n\n"
                 f"¿Qué tipo de combustible?\n\n"
                 f"Seleccione una opción:",
                 reply_markup=keyboard.as_markup(resize_keyboard=True),
@@ -1558,7 +1605,7 @@ async def confirmar_tipo_transporte(message: types.Message, state: FSMContext):
         
         elif tipo_carga == "Concentrado":
             await message.answer(
-                f"✅ Tipo de carga: *{tipo_carga}*\n\n"
+                f"✅ Placa: *{placa}*\n\n"
                 f"📋 *DATOS DE LA FACTURA*\n\n"
                 f"Por favor ingrese el *número de factura*:",
                 reply_markup=ReplyKeyboardRemove(),
