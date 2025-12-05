@@ -4511,8 +4511,7 @@ async def celdas_agregar_mas_si(message: types.Message, state: FSMContext):
 async def celdas_agregar_mas_no(message: types.Message, state: FSMContext):
     """Finalizar registro de celdas"""
     await message.answer(
-        "✅ *Registro de celdas de carga completado*\n\n"
-        "¡Gracias por su registro!",
+        "✅ *Registro de celdas de carga completado*",
         parse_mode="Markdown",
         reply_markup=types.ReplyKeyboardRemove()
     )
@@ -4574,132 +4573,138 @@ async def combustible_confirmar_cedula_invalido(message: types.Message, state: F
 
 @dp.message(RegistroState.combustible_tipo)
 async def combustible_seleccionar_tipo(message: types.Message, state: FSMContext):
-    """Procesar tipo de combustible"""
+    """Procesar tipo de combustible y mostrar opciones según el tipo"""
     texto = message.text.lower()
 
     if "diesel" in texto:
         tipo = "Diesel"
+        await state.update_data(combustible_tipo=tipo)
+
+        # Opciones para Diesel: Planta 1, Planta 2, Otros
+        builder = ReplyKeyboardBuilder()
+        builder.add(types.KeyboardButton(text="🔧 Planta 1"))
+        builder.add(types.KeyboardButton(text="🔧 Planta 2"))
+        builder.add(types.KeyboardButton(text="⚙️ Otros"))
+        builder.adjust(2)
+
+        await message.answer(
+            "🚜 *¿Qué equipo o maquinaria va a tanquear?*\n\n"
+            "Seleccione una opción:",
+            parse_mode="Markdown",
+            reply_markup=builder.as_markup(resize_keyboard=True)
+        )
+        await state.set_state(RegistroState.combustible_equipo)
+
     elif "gasolina" in texto:
         tipo = "Gasolina"
+        await state.update_data(combustible_tipo=tipo)
+
+        # Opciones para Gasolina: Can-am, Vehículos, Equipos
+        builder = ReplyKeyboardBuilder()
+        builder.add(types.KeyboardButton(text="🏍️ Can-am"))
+        builder.add(types.KeyboardButton(text="🚗 Vehículos"))
+        builder.add(types.KeyboardButton(text="⚙️ Equipos"))
+        builder.adjust(2)
+
+        await message.answer(
+            "🚜 *¿Qué equipo o maquinaria va a tanquear?*\n\n"
+            "Seleccione una opción:",
+            parse_mode="Markdown",
+            reply_markup=builder.as_markup(resize_keyboard=True)
+        )
+        await state.set_state(RegistroState.combustible_equipo)
+
     else:
         await message.answer("⚠️ Por favor seleccione Diesel o Gasolina usando los botones.")
         return
 
-    await state.update_data(combustible_tipo=tipo)
-
-    builder = ReplyKeyboardBuilder()
-    builder.add(types.KeyboardButton(text="1"))
-    builder.add(types.KeyboardButton(text="2"))
-    builder.adjust(2)
-
-    await message.answer(
-        f"⛽ Tipo seleccionado: *{tipo}*\n\n"
-        "¿Es correcto?\n\n"
-        "1️⃣ Sí, confirmar\n"
-        "2️⃣ No, editar\n\n"
-        "Escriba el número de la opción:",
-        parse_mode="Markdown",
-        reply_markup=builder.as_markup(resize_keyboard=True)
-    )
-    await state.set_state(RegistroState.combustible_confirmar_tipo)
-
-@dp.message(RegistroState.combustible_confirmar_tipo, F.text == "1")
-async def combustible_confirmar_tipo_si(message: types.Message, state: FSMContext):
-    """Confirmar tipo y preguntar equipo/maquinaria"""
-    builder = ReplyKeyboardBuilder()
-    builder.add(types.KeyboardButton(text="🚗 Vehículo"))
-    builder.add(types.KeyboardButton(text="🚜 Tractor"))
-    builder.add(types.KeyboardButton(text="🔧 Planta eléctrica"))
-    builder.add(types.KeyboardButton(text="⚙️ Otro"))
-    builder.adjust(2)
-
-    await message.answer(
-        "🚜 *Equipo o Maquinaria*\n\n"
-        "Seleccione el equipo o maquinaria:",
-        parse_mode="Markdown",
-        reply_markup=builder.as_markup(resize_keyboard=True)
-    )
-    await state.set_state(RegistroState.combustible_equipo)
-
-@dp.message(RegistroState.combustible_confirmar_tipo, F.text == "2")
-async def combustible_confirmar_tipo_no(message: types.Message, state: FSMContext):
-    """Volver a seleccionar tipo"""
-    builder = ReplyKeyboardBuilder()
-    builder.add(types.KeyboardButton(text="⛽ Diesel"))
-    builder.add(types.KeyboardButton(text="⛽ Gasolina"))
-    builder.adjust(2)
-
-    await message.answer(
-        "⛽ *Tipo de Combustible*\n\n"
-        "Seleccione el tipo de combustible:",
-        parse_mode="Markdown",
-        reply_markup=builder.as_markup(resize_keyboard=True)
-    )
-    await state.set_state(RegistroState.combustible_tipo)
-
-@dp.message(RegistroState.combustible_confirmar_tipo)
-async def combustible_confirmar_tipo_invalido(message: types.Message, state: FSMContext):
-    await message.answer("⚠️ Por favor seleccione 1 o 2.")
-
 @dp.message(RegistroState.combustible_equipo)
 async def combustible_seleccionar_equipo(message: types.Message, state: FSMContext):
-    """Procesar equipo/maquinaria seleccionado"""
+    """Procesar equipo/maquinaria seleccionado según tipo de combustible"""
     texto = message.text.lower()
+    data = await state.get_data()
+    tipo_combustible = data.get('combustible_tipo')
 
-    if "vehículo" in texto or "vehiculo" in texto:
-        equipo = "Vehículo"
-        await state.update_data(combustible_equipo=equipo, combustible_requiere_placa=True)
-        # Pedir placa
-        await message.answer(
-            "🚗 *Placa del Vehículo*\n\n"
-            "Ingrese la placa del vehículo:",
-            parse_mode="Markdown",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-        await state.set_state(RegistroState.combustible_placa)
-    elif "tractor" in texto:
-        equipo = "Tractor"
-        await state.update_data(combustible_equipo=equipo, combustible_requiere_placa=False)
-        # Pedir nombre del equipo
-        await message.answer(
-            "🚜 *Nombre del Tractor*\n\n"
-            "Ingrese el nombre o identificación del tractor:",
-            parse_mode="Markdown",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-        await state.set_state(RegistroState.combustible_nombre_equipo)
-    elif "planta" in texto:
-        equipo = "Planta eléctrica"
-        await state.update_data(combustible_equipo=equipo, combustible_requiere_placa=False)
-        # Pedir nombre del equipo
-        await message.answer(
-            "🔧 *Nombre de la Planta Eléctrica*\n\n"
-            "Ingrese el nombre o identificación de la planta eléctrica:",
-            parse_mode="Markdown",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-        await state.set_state(RegistroState.combustible_nombre_equipo)
-    elif "otro" in texto:
-        equipo = "Otro"
-        await state.update_data(combustible_equipo=equipo, combustible_requiere_placa=False)
-        # Pedir nombre del equipo
-        await message.answer(
-            "⚙️ *Nombre del Equipo*\n\n"
-            "Ingrese el nombre o descripción del equipo:",
-            parse_mode="Markdown",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-        await state.set_state(RegistroState.combustible_nombre_equipo)
-    else:
-        await message.answer("⚠️ Por favor seleccione una opción válida usando los botones.")
+    if tipo_combustible == "Diesel":
+        # Opciones Diesel: Planta 1, Planta 2, Otros
+        if "planta 1" in texto:
+            equipo = "Planta 1"
+            await state.update_data(combustible_equipo=equipo)
+            await mostrar_centro_costo(message, state)
+        elif "planta 2" in texto:
+            equipo = "Planta 2"
+            await state.update_data(combustible_equipo=equipo)
+            await mostrar_centro_costo(message, state)
+        elif "otros" in texto:
+            await state.update_data(combustible_equipo="Otros")
+            await message.answer(
+                "⚙️ *Nombre del Equipo*\n\n"
+                "Por favor escriba el equipo:",
+                parse_mode="Markdown",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
+            await state.set_state(RegistroState.combustible_nombre_equipo)
+        else:
+            await message.answer("⚠️ Por favor seleccione una opción válida usando los botones.")
+
+    elif tipo_combustible == "Gasolina":
+        # Opciones Gasolina: Can-am, Vehículos, Equipos
+        if "can-am" in texto or "canam" in texto:
+            equipo = "Can-am"
+            await state.update_data(combustible_equipo=equipo)
+            await mostrar_centro_costo(message, state)
+        elif "vehículo" in texto or "vehiculo" in texto:
+            await state.update_data(combustible_equipo="Vehículo")
+            await message.answer(
+                "🚗 *Placa del Vehículo*\n\n"
+                "Ingrese la placa del vehículo (formato: ABC123):",
+                parse_mode="Markdown",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
+            await state.set_state(RegistroState.combustible_placa)
+        elif "equipo" in texto:
+            await state.update_data(combustible_equipo="Equipos")
+            await message.answer(
+                "⚙️ *Nombre del Equipo*\n\n"
+                "Por favor escriba el equipo:",
+                parse_mode="Markdown",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
+            await state.set_state(RegistroState.combustible_nombre_equipo)
+        else:
+            await message.answer("⚠️ Por favor seleccione una opción válida usando los botones.")
+
+async def mostrar_centro_costo(message: types.Message, state: FSMContext):
+    """Mostrar opciones de centro de costo"""
+    builder = ReplyKeyboardBuilder()
+    builder.add(types.KeyboardButton(text="🐷 Porcicultura"))
+    builder.add(types.KeyboardButton(text="🌾 Finca"))
+    builder.add(types.KeyboardButton(text="🏢 Administrativo"))
+    builder.add(types.KeyboardButton(text="🏝️ Manakao"))
+    builder.add(types.KeyboardButton(text="📤 Externo"))
+    builder.adjust(2)
+
+    await message.answer(
+        "📍 *¿Qué centro de costo (área) es?*\n\n"
+        "Seleccione una opción:",
+        parse_mode="Markdown",
+        reply_markup=builder.as_markup(resize_keyboard=True)
+    )
+    await state.set_state(RegistroState.combustible_centro_costo)
 
 @dp.message(RegistroState.combustible_placa)
 async def combustible_get_placa(message: types.Message, state: FSMContext):
-    """Obtener placa del vehículo"""
+    """Obtener y validar placa del vehículo"""
     placa = message.text.strip().upper()
 
-    if len(placa) < 5:
-        await message.answer("⚠️ Ingrese una placa válida.")
+    # Usar la validación existente de placas
+    if not validar_placa(placa):
+        await message.answer(
+            "⚠️ Placa inválida.\n\n"
+            "El formato debe ser: 3 letras + 3 números\n"
+            "Ejemplo: ABC123\n\n"
+            "Por favor ingrese la placa nuevamente:"
+        )
         return
 
     await state.update_data(combustible_placa=placa)
@@ -4723,27 +4728,14 @@ async def combustible_get_placa(message: types.Message, state: FSMContext):
 @dp.message(RegistroState.combustible_confirmar_placa, F.text == "1")
 async def combustible_confirmar_placa_si(message: types.Message, state: FSMContext):
     """Confirmar placa y pasar a centro de costo"""
-    builder = ReplyKeyboardBuilder()
-    builder.add(types.KeyboardButton(text="📍 Sitio 1"))
-    builder.add(types.KeyboardButton(text="📍 Sitio 2"))
-    builder.add(types.KeyboardButton(text="📍 Sitio 3"))
-    builder.add(types.KeyboardButton(text="📍 Administrativo"))
-    builder.adjust(2)
-
-    await message.answer(
-        "📍 *Centro de Costo*\n\n"
-        "Seleccione el centro de costo:",
-        parse_mode="Markdown",
-        reply_markup=builder.as_markup(resize_keyboard=True)
-    )
-    await state.set_state(RegistroState.combustible_centro_costo)
+    await mostrar_centro_costo(message, state)
 
 @dp.message(RegistroState.combustible_confirmar_placa, F.text == "2")
 async def combustible_confirmar_placa_no(message: types.Message, state: FSMContext):
     """Editar placa"""
     await message.answer(
         "🚗 *Placa del Vehículo*\n\n"
-        "Ingrese nuevamente la placa del vehículo:",
+        "Ingrese nuevamente la placa del vehículo (formato: ABC123):",
         parse_mode="Markdown",
         reply_markup=types.ReplyKeyboardRemove()
     )
@@ -4770,7 +4762,7 @@ async def combustible_get_nombre_equipo(message: types.Message, state: FSMContex
     builder.adjust(2)
 
     await message.answer(
-        f"⚙️ Nombre del equipo: *{nombre}*\n\n"
+        f"⚙️ Equipo ingresado: *{nombre}*\n\n"
         "¿Es correcto?\n\n"
         "1️⃣ Sí, confirmar\n"
         "2️⃣ No, editar\n\n"
@@ -4783,30 +4775,14 @@ async def combustible_get_nombre_equipo(message: types.Message, state: FSMContex
 @dp.message(RegistroState.combustible_confirmar_nombre_equipo, F.text == "1")
 async def combustible_confirmar_nombre_si(message: types.Message, state: FSMContext):
     """Confirmar nombre y pasar a centro de costo"""
-    builder = ReplyKeyboardBuilder()
-    builder.add(types.KeyboardButton(text="📍 Sitio 1"))
-    builder.add(types.KeyboardButton(text="📍 Sitio 2"))
-    builder.add(types.KeyboardButton(text="📍 Sitio 3"))
-    builder.add(types.KeyboardButton(text="📍 Administrativo"))
-    builder.adjust(2)
-
-    await message.answer(
-        "📍 *Centro de Costo*\n\n"
-        "Seleccione el centro de costo:",
-        parse_mode="Markdown",
-        reply_markup=builder.as_markup(resize_keyboard=True)
-    )
-    await state.set_state(RegistroState.combustible_centro_costo)
+    await mostrar_centro_costo(message, state)
 
 @dp.message(RegistroState.combustible_confirmar_nombre_equipo, F.text == "2")
 async def combustible_confirmar_nombre_no(message: types.Message, state: FSMContext):
     """Editar nombre del equipo"""
-    data = await state.get_data()
-    equipo = data.get('combustible_equipo', 'Equipo')
-
     await message.answer(
-        f"⚙️ *Nombre del {equipo}*\n\n"
-        f"Ingrese nuevamente el nombre o identificación del {equipo.lower()}:",
+        "⚙️ *Nombre del Equipo*\n\n"
+        "Por favor escriba el equipo:",
         parse_mode="Markdown",
         reply_markup=types.ReplyKeyboardRemove()
     )
@@ -4821,14 +4797,16 @@ async def combustible_seleccionar_centro(message: types.Message, state: FSMConte
     """Procesar centro de costo"""
     texto = message.text.lower()
 
-    if "sitio 1" in texto:
-        centro = "Sitio 1"
-    elif "sitio 2" in texto:
-        centro = "Sitio 2"
-    elif "sitio 3" in texto:
-        centro = "Sitio 3"
+    if "porcicultura" in texto:
+        centro = "Porcicultura"
+    elif "finca" in texto:
+        centro = "Finca"
     elif "administrativo" in texto:
         centro = "Administrativo"
+    elif "manakao" in texto:
+        centro = "Manakao"
+    elif "externo" in texto:
+        centro = "Externo"
     else:
         await message.answer("⚠️ Por favor seleccione un centro de costo válido usando los botones.")
         return
@@ -4888,10 +4866,12 @@ async def combustible_confirmar_centro_si(message: types.Message, state: FSMCont
             fecha_hora = datetime.now().strftime("%d/%m/%Y %H:%M")
 
             # Construir detalles del equipo
-            if equipo == "Vehículo":
+            if equipo == "Vehículo" and placa:
                 detalle_equipo = f"🚗 Vehículo - Placa: {placa}"
-            else:
+            elif nombre_equipo:
                 detalle_equipo = f"⚙️ {equipo}: {nombre_equipo}"
+            else:
+                detalle_equipo = f"⚙️ {equipo}"
 
             mensaje_grupo = (
                 "⛽ *REGISTRO DE COMBUSTIBLE - SITIO 3*\n"
@@ -4908,10 +4888,12 @@ async def combustible_confirmar_centro_si(message: types.Message, state: FSMCont
             print(f"⚠️ Error enviando notificación al grupo: {e}")
 
     # Mostrar resumen al usuario
-    if equipo == "Vehículo":
+    if equipo == "Vehículo" and placa:
         detalle = f"Vehículo - Placa: {placa}"
-    else:
+    elif nombre_equipo:
         detalle = f"{equipo}: {nombre_equipo}"
+    else:
+        detalle = equipo
 
     resumen = (
         "✅ *Registro de combustible guardado exitosamente*\n\n"
@@ -4920,8 +4902,7 @@ async def combustible_confirmar_centro_si(message: types.Message, state: FSMCont
         f"• Tipo: {tipo}\n"
         f"• Equipo: {detalle}\n"
         f"• Centro de costo: {centro_costo}\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "¡Gracias por su registro!"
+        "━━━━━━━━━━━━━━━━━━━━"
     )
 
     await message.answer(resumen, parse_mode="Markdown", reply_markup=types.ReplyKeyboardRemove())
@@ -4931,20 +4912,7 @@ async def combustible_confirmar_centro_si(message: types.Message, state: FSMCont
 @dp.message(RegistroState.combustible_confirmar_centro_costo, F.text == "2")
 async def combustible_confirmar_centro_no(message: types.Message, state: FSMContext):
     """Volver a seleccionar centro de costo"""
-    builder = ReplyKeyboardBuilder()
-    builder.add(types.KeyboardButton(text="📍 Sitio 1"))
-    builder.add(types.KeyboardButton(text="📍 Sitio 2"))
-    builder.add(types.KeyboardButton(text="📍 Sitio 3"))
-    builder.add(types.KeyboardButton(text="📍 Administrativo"))
-    builder.adjust(2)
-
-    await message.answer(
-        "📍 *Centro de Costo*\n\n"
-        "Seleccione el centro de costo:",
-        parse_mode="Markdown",
-        reply_markup=builder.as_markup(resize_keyboard=True)
-    )
-    await state.set_state(RegistroState.combustible_centro_costo)
+    await mostrar_centro_costo(message, state)
 
 @dp.message(RegistroState.combustible_confirmar_centro_costo)
 async def combustible_confirmar_centro_invalido(message: types.Message, state: FSMContext):
@@ -5132,8 +5100,7 @@ async def traslado_confirmar_destino_si(message: types.Message, state: FSMContex
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         f"• Corral origen: {corral_origen}\n"
         f"• Corral destino: {corral_destino}\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "¡Gracias por su registro!"
+        "━━━━━━━━━━━━━━━━━━━━"
     )
 
     await message.answer(resumen, parse_mode="Markdown", reply_markup=types.ReplyKeyboardRemove())
