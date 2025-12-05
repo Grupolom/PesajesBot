@@ -2672,7 +2672,7 @@ async def confirmar_lechones_por_pesaje(message: types.Message, state: FSMContex
 async def procesar_peso_pesaje(message: types.Message, state: FSMContext):
     """Procesa el peso de un pesaje"""
     es_valido, peso, error = validar_galones(message.text.strip())  # Reutilizamos validador de decimales
-    
+
     if not es_valido or peso <= 0:
         await message.answer(
             f"⚠️ Peso inválido. Ingrese un número válido mayor a 0 kg\n\n"
@@ -2680,43 +2680,10 @@ async def procesar_peso_pesaje(message: types.Message, state: FSMContext):
         )
         return
 
-    import math
-    total_grupos = math.ceil(cantidad_lechones / cantidad_grupo)
-
-    await state.update_data(
-        lechones_por_grupo=cantidad_grupo,
-        grupo_actual=1,
-        pesos=[],
-        fotos=[],
-        fotos_locales=[]
-    )
-
-    await message.answer(
-        f"✅ Agrupación: *{cantidad_grupo} lechones por pesaje*\n\n"
-        f"Total de pesajes a realizar: *{total_grupos}*\n\n"
-        f"📊 Ingrese el *peso del primer pesaje ({cantidad_grupo} lechones)* en kilogramos:\n"
-        f"_(Ejemplo: 125.5 o 150)_",
-        reply_markup=ReplyKeyboardRemove(),
-        parse_mode="Markdown"
-    )
-    await state.set_state(OperarioSitio1State.peso_lechon)
-
-@dp.message(OperarioSitio1State.peso_lechon)
-async def procesar_peso_lechon(message: types.Message, state: FSMContext):
-    """Procesa el peso de un grupo de lechones"""
-    es_valido, peso, error = validar_galones(message.text.strip())  # Reutilizamos validador de decimales
-
-    if not es_valido or peso <= 0 or peso > 5000:
-        await message.answer(
-            f"⚠️ Peso inválido. Ingrese un número válido entre 0.1 y 5000 kg\n\n"
-            f"Intente nuevamente:"
-        )
-        return
-
     data = await state.get_data()
     pesaje_actual = data.get("pesaje_actual")
     lechones_por_pesaje = data.get("lechones_por_pesaje")
-    
+
     await state.update_data(peso_temp=peso)
     await preguntar_confirmacion(message, f"{peso:,.2f} kg", f"peso del pesaje #{pesaje_actual} ({lechones_por_pesaje} lechones)")
     await state.set_state(OperarioSitio1State.confirmar_peso)
