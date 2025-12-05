@@ -348,6 +348,9 @@ class OperarioSitio1State(StatesGroup):
     cedula = State()
     confirmar_cedula = State()
 
+    cantidad_lechones = State()  # Cuantos lechones va a pesar
+    confirmar_cantidad_lechones = State()
+
     cantidad_pesajes = State()
     confirmar_cantidad_pesajes = State()
 
@@ -2532,6 +2535,64 @@ async def confirmar_cedula_sitio1_si(message: types.Message, state: FSMContext):
         parse_mode="Markdown"
     )
     await state.set_state(OperarioSitio1State.cantidad_lechones)
+
+@dp.message(OperarioSitio1State.cantidad_lechones)
+async def procesar_cantidad_lechones(message: types.Message, state: FSMContext):
+    """Procesa la cantidad de lechones a pesar"""
+    es_valido, cantidad, error = validar_numero_entero(message.text.strip(), minimo=1, maximo=10000)
+    
+    if not es_valido:
+        await message.answer(f"⚠️ {error}\n\nIntente nuevamente:")
+        return
+    
+    await state.update_data(cantidad_lechones=cantidad)
+    
+    keyboard = ReplyKeyboardBuilder()
+    keyboard.button(text="1. Sí, confirmar")
+    keyboard.button(text="2. No, editar")
+    keyboard.adjust(2)
+    
+    await message.answer(
+        f"Cantidad de lechones: *{cantidad}*\n\n"
+        f"¿Es correcta?\n\n"
+        f"1️⃣ Sí, confirmar\n"
+        f"2️⃣ No, editar\n\n"
+        f"Escriba el número de la opción:",
+        reply_markup=keyboard.as_markup(resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+    await state.set_state(OperarioSitio1State.confirmar_cantidad_lechones)
+
+@dp.message(OperarioSitio1State.confirmar_cantidad_lechones)
+async def confirmar_cantidad_lechones(message: types.Message, state: FSMContext):
+    """Confirma la cantidad de lechones o permite modificarla"""
+    texto = message.text.strip().lower()
+    
+    if "2" in texto or "editar" in texto or "no" in texto:
+        await message.answer(
+            "¿Cuántos *lechones* va a pesar?\n"
+            "_(Ingrese un número)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(OperarioSitio1State.cantidad_lechones)
+        return
+    
+    if "1" in texto or "confirmar" in texto or "sí" in texto or "si" in texto:
+        data = await state.get_data()
+        cantidad_lechones = data.get('cantidad_lechones')
+        
+        await message.answer(
+            f"✅ Cantidad de lechones: *{cantidad_lechones}*\n\n"
+            f"¿Cuántos *pesajes* va a registrar?\n"
+            f"_(Ejemplo: 30 pesajes)_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        await state.set_state(OperarioSitio1State.cantidad_pesajes)
+        return
+    
+    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Editar:")
 
 @dp.message(OperarioSitio1State.confirmar_cedula, F.text == "2")
 async def confirmar_cedula_sitio1_no(message: types.Message, state: FSMContext):
