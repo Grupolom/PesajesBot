@@ -284,6 +284,8 @@ class RegistroState(StatesGroup):
     traslado_confirmar_origen = State()
     traslado_corral_destino = State()
     traslado_confirmar_destino = State()
+    traslado_cantidad_animales = State()
+    traslado_confirmar_cantidad = State()
 
 # ==================== ESTADOS PARA MENU CONDUCTORES ==================== #
 class ConductoresState(StatesGroup):
@@ -4964,6 +4966,36 @@ async def combustible_confirmar_centro_invalido(message: types.Message, state: F
 
 # ==================== SUBOPCIÓN 6: TRASLADO ENTRE CORRALES ==================== #
 
+def validar_numero_corral(valor: str) -> tuple[bool, int, str]:
+    """
+    Valida número de corral: entero entre 1 y 59
+    Retorna: (es_valido, numero, mensaje_error)
+    """
+    try:
+        numero = int(valor)
+        if numero < 1:
+            return False, 0, "El número de corral debe ser mayor a 0"
+        if numero > 59:
+            return False, 0, "El número de corral no puede ser mayor a 59 (solo hay 59 corrales)"
+        return True, numero, ""
+    except ValueError:
+        return False, 0, "Debe ingresar un número entero válido"
+
+def validar_cantidad_animales_traslado(valor: str) -> tuple[bool, int, str]:
+    """
+    Valida cantidad de animales para traslado: entero positivo
+    Retorna: (es_valido, cantidad, mensaje_error)
+    """
+    try:
+        cantidad = int(valor)
+        if cantidad < 1:
+            return False, 0, "La cantidad debe ser al menos 1 animal"
+        if cantidad > 5000:
+            return False, 0, "La cantidad no puede superar 5000 animales"
+        return True, cantidad, ""
+    except ValueError:
+        return False, 0, "Debe ingresar un número entero válido"
+
 @dp.message(RegistroState.traslado_cedula)
 async def traslado_get_cedula(message: types.Message, state: FSMContext):
     """Obtener cédula del operario para traslado entre corrales"""
@@ -4988,7 +5020,8 @@ async def traslado_confirmar_cedula_si(message: types.Message, state: FSMContext
     """Confirmar cédula y pedir corral de origen"""
     await message.answer(
         "🐷 *Corral de Origen*\n\n"
-        "Ingrese el número de corral de donde salen los animales:",
+        "¿De qué corral salen los animales?\n\n"
+        "Ingrese un número del 1 al 59:",
         parse_mode="Markdown"
     )
     await state.set_state(RegistroState.traslado_corral_origen)
@@ -5006,13 +5039,13 @@ async def traslado_confirmar_cedula_invalido(message: types.Message, state: FSMC
 @dp.message(RegistroState.traslado_corral_origen)
 async def traslado_get_corral_origen(message: types.Message, state: FSMContext):
     """Obtener corral de origen"""
-    corral = message.text.strip()
+    es_valido, numero_corral, error_msg = validar_numero_corral(message.text.strip())
 
-    if not corral:
-        await message.answer("⚠️ Por favor ingrese el número de corral.")
+    if not es_valido:
+        await message.answer(f"⚠️ {error_msg}\n\nIngrese un número del 1 al 59:")
         return
 
-    await state.update_data(traslado_corral_origen=corral)
+    await state.update_data(traslado_corral_origen=numero_corral)
 
     builder = ReplyKeyboardBuilder()
     builder.add(types.KeyboardButton(text="1"))
@@ -5020,7 +5053,7 @@ async def traslado_get_corral_origen(message: types.Message, state: FSMContext):
     builder.adjust(2)
 
     await message.answer(
-        f"🐷 Corral de origen: *{corral}*\n\n"
+        f"🐷 Corral de origen: *{numero_corral}*\n\n"
         "¿Es correcto?\n\n"
         "1️⃣ Sí, confirmar\n"
         "2️⃣ No, editar\n\n"
@@ -5035,7 +5068,8 @@ async def traslado_confirmar_origen_si(message: types.Message, state: FSMContext
     """Confirmar origen y pedir corral de destino"""
     await message.answer(
         "🐷 *Corral de Destino*\n\n"
-        "Ingrese el número de corral de destino:",
+        "¿A qué corral entrarán los animales?\n\n"
+        "Ingrese un número del 1 al 59:",
         parse_mode="Markdown",
         reply_markup=types.ReplyKeyboardRemove()
     )
@@ -5046,7 +5080,8 @@ async def traslado_confirmar_origen_no(message: types.Message, state: FSMContext
     """Editar corral de origen"""
     await message.answer(
         "🐷 *Corral de Origen*\n\n"
-        "Ingrese nuevamente el número de corral de donde salen los animales:",
+        "¿De qué corral salen los animales?\n\n"
+        "Ingrese un número del 1 al 59:",
         parse_mode="Markdown",
         reply_markup=types.ReplyKeyboardRemove()
     )
@@ -5059,20 +5094,23 @@ async def traslado_confirmar_origen_invalido(message: types.Message, state: FSMC
 @dp.message(RegistroState.traslado_corral_destino)
 async def traslado_get_corral_destino(message: types.Message, state: FSMContext):
     """Obtener corral de destino"""
-    corral = message.text.strip()
+    es_valido, numero_corral, error_msg = validar_numero_corral(message.text.strip())
 
-    if not corral:
-        await message.answer("⚠️ Por favor ingrese el número de corral.")
+    if not es_valido:
+        await message.answer(f"⚠️ {error_msg}\n\nIngrese un número del 1 al 59:")
         return
 
     data = await state.get_data()
     corral_origen = data.get('traslado_corral_origen')
 
-    if corral == corral_origen:
-        await message.answer("⚠️ El corral de destino no puede ser igual al corral de origen.")
+    if numero_corral == corral_origen:
+        await message.answer(
+            "⚠️ El corral de destino no puede ser igual al corral de origen.\n\n"
+            "Ingrese un número diferente del 1 al 59:"
+        )
         return
 
-    await state.update_data(traslado_corral_destino=corral)
+    await state.update_data(traslado_corral_destino=numero_corral)
 
     builder = ReplyKeyboardBuilder()
     builder.add(types.KeyboardButton(text="1"))
@@ -5080,7 +5118,7 @@ async def traslado_get_corral_destino(message: types.Message, state: FSMContext)
     builder.adjust(2)
 
     await message.answer(
-        f"🐷 Corral de destino: *{corral}*\n\n"
+        f"🐷 Corral de destino: *{numero_corral}*\n\n"
         "¿Es correcto?\n\n"
         "1️⃣ Sí, confirmar\n"
         "2️⃣ No, editar\n\n"
@@ -5092,11 +5130,67 @@ async def traslado_get_corral_destino(message: types.Message, state: FSMContext)
 
 @dp.message(RegistroState.traslado_confirmar_destino, F.text == "1")
 async def traslado_confirmar_destino_si(message: types.Message, state: FSMContext):
-    """Confirmar destino y guardar traslado"""
+    """Confirmar destino y pedir cantidad de animales"""
+    await message.answer(
+        "🐷 *Cantidad de Animales*\n\n"
+        "¿Cuántos animales trasladó?\n\n"
+        "Ingrese la cantidad:",
+        parse_mode="Markdown",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await state.set_state(RegistroState.traslado_cantidad_animales)
+
+@dp.message(RegistroState.traslado_confirmar_destino, F.text == "2")
+async def traslado_confirmar_destino_no(message: types.Message, state: FSMContext):
+    """Editar corral de destino"""
+    await message.answer(
+        "🐷 *Corral de Destino*\n\n"
+        "¿A qué corral entrarán los animales?\n\n"
+        "Ingrese un número del 1 al 59:",
+        parse_mode="Markdown",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await state.set_state(RegistroState.traslado_corral_destino)
+
+@dp.message(RegistroState.traslado_confirmar_destino)
+async def traslado_confirmar_destino_invalido(message: types.Message, state: FSMContext):
+    await message.answer("⚠️ Por favor seleccione 1 o 2.")
+
+@dp.message(RegistroState.traslado_cantidad_animales)
+async def traslado_get_cantidad_animales(message: types.Message, state: FSMContext):
+    """Obtener cantidad de animales trasladados"""
+    es_valido, cantidad, error_msg = validar_cantidad_animales_traslado(message.text.strip())
+
+    if not es_valido:
+        await message.answer(f"⚠️ {error_msg}\n\nIngrese la cantidad de animales:")
+        return
+
+    await state.update_data(traslado_cantidad_animales=cantidad)
+
+    builder = ReplyKeyboardBuilder()
+    builder.add(types.KeyboardButton(text="1"))
+    builder.add(types.KeyboardButton(text="2"))
+    builder.adjust(2)
+
+    await message.answer(
+        f"🐷 Cantidad de animales: *{cantidad}*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown",
+        reply_markup=builder.as_markup(resize_keyboard=True)
+    )
+    await state.set_state(RegistroState.traslado_confirmar_cantidad)
+
+@dp.message(RegistroState.traslado_confirmar_cantidad, F.text == "1")
+async def traslado_confirmar_cantidad_si(message: types.Message, state: FSMContext):
+    """Confirmar cantidad y guardar traslado"""
     data = await state.get_data()
     cedula = data.get('traslado_cedula')
     corral_origen = data.get('traslado_corral_origen')
     corral_destino = data.get('traslado_corral_destino')
+    cantidad_animales = data.get('traslado_cantidad_animales')
 
     # Guardar en base de datos
     conn = None
@@ -5106,10 +5200,10 @@ async def traslado_confirmar_destino_si(message: types.Message, state: FSMContex
             session_id = str(uuid.uuid4())
             await conn.execute('''
                 INSERT INTO operario_sitio3_traslado_corrales
-                (cedula_operario, corral_origen, corral_destino, session_id, telegram_user_id)
-                VALUES ($1, $2, $3, $4, $5)
-            ''', cedula, corral_origen, corral_destino, session_id, message.from_user.id)
-            print(f"✅ Traslado entre corrales guardado: {corral_origen} -> {corral_destino}")
+                (cedula_operario, corral_origen, corral_destino, cantidad_animales, session_id, telegram_user_id)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            ''', cedula, str(corral_origen), str(corral_destino), cantidad_animales, session_id, message.from_user.id)
+            print(f"✅ Traslado entre corrales guardado: {corral_origen} -> {corral_destino} ({cantidad_animales} animales)")
     except Exception as e:
         print(f"⚠️ Error guardando traslado: {e}")
         import traceback
@@ -5128,6 +5222,7 @@ async def traslado_confirmar_destino_si(message: types.Message, state: FSMContex
                 f"👤 Cédula: {cedula}\n"
                 f"📤 Corral origen: {corral_origen}\n"
                 f"📥 Corral destino: {corral_destino}\n"
+                f"🐷 Animales trasladados: {cantidad_animales}\n"
                 f"📅 Fecha: {fecha_hora}\n"
                 "━━━━━━━━━━━━━━━━━━━━"
             )
@@ -5142,6 +5237,7 @@ async def traslado_confirmar_destino_si(message: types.Message, state: FSMContex
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         f"• Corral origen: {corral_origen}\n"
         f"• Corral destino: {corral_destino}\n"
+        f"• Animales trasladados: {cantidad_animales}\n"
         "━━━━━━━━━━━━━━━━━━━━"
     )
 
@@ -5149,19 +5245,20 @@ async def traslado_confirmar_destino_si(message: types.Message, state: FSMContex
     await asyncio.sleep(1)
     await finalizar_flujo(message, state)
 
-@dp.message(RegistroState.traslado_confirmar_destino, F.text == "2")
-async def traslado_confirmar_destino_no(message: types.Message, state: FSMContext):
-    """Editar corral de destino"""
+@dp.message(RegistroState.traslado_confirmar_cantidad, F.text == "2")
+async def traslado_confirmar_cantidad_no(message: types.Message, state: FSMContext):
+    """Editar cantidad de animales"""
     await message.answer(
-        "🐷 *Corral de Destino*\n\n"
-        "Ingrese nuevamente el número de corral de destino:",
+        "🐷 *Cantidad de Animales*\n\n"
+        "¿Cuántos animales trasladó?\n\n"
+        "Ingrese la cantidad:",
         parse_mode="Markdown",
         reply_markup=types.ReplyKeyboardRemove()
     )
-    await state.set_state(RegistroState.traslado_corral_destino)
+    await state.set_state(RegistroState.traslado_cantidad_animales)
 
-@dp.message(RegistroState.traslado_confirmar_destino)
-async def traslado_confirmar_destino_invalido(message: types.Message, state: FSMContext):
+@dp.message(RegistroState.traslado_confirmar_cantidad)
+async def traslado_confirmar_cantidad_invalido(message: types.Message, state: FSMContext):
     await message.answer("⚠️ Por favor seleccione 1 o 2.")
 
 # ==================== FIN TRASLADO ENTRE CORRALES ==================== #
