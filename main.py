@@ -1950,34 +1950,50 @@ async def confirmar_kilos_comprados(message: types.Message, state: FSMContext):
 
 @dp.message(ConductoresState.factura_foto, F.photo)
 async def procesar_factura_foto(message: types.Message, state: FSMContext):
-    """Procesa la foto de la factura"""
+    """Procesa la foto de la factura - Para Concentrado va directo al resumen (báscula siempre Italcol)"""
     # Obtener la foto de mayor resolución
     photo = message.photo[-1]
     file_id = photo.file_id
-    
+
     # Descargar foto
     file = await bot.get_file(file_id)
     os.makedirs("imagenes_pesajes", exist_ok=True)
-    
+
     data = await state.get_data()
     cedula = data.get("cedula")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"factura_{cedula}_{timestamp}.jpg"
     file_path = os.path.join("imagenes_pesajes", filename)
-    
+
     await bot.download_file(file.file_path, file_path)
-    
+
     # Subir a Drive
     drive_link = upload_to_drive(file_path, filename)
-    await state.update_data(factura_foto=drive_link or file_path)
-    
+    await state.update_data(
+        factura_foto=drive_link or file_path,
+        foto_pesaje=drive_link or file_path,  # Usar la misma foto como foto de pesaje
+        bascula="Báscula Italcol",  # Siempre Italcol para Concentrado
+        peso=data.get("kilos_comprados")  # El peso es igual a los kilos comprados
+    )
+
+    # Crear resumen para confirmación directa (sin pedir báscula ni peso)
+    data_actualizada = await state.get_data()
+    resumen = crear_resumen_conductor(data_actualizada)
+
+    keyboard = ReplyKeyboardBuilder()
+    keyboard.button(text="✅ Sí, confirmar")
+    keyboard.button(text="❌ No, cancelar")
+    keyboard.adjust(1)
+
     await message.answer(
         f"✅ Foto de factura recibida\n\n"
-        f"Continuando con el registro..."
+        f"📋 *RESUMEN DEL REGISTRO*\n\n"
+        f"{resumen}\n\n"
+        f"¿Está seguro de la información?",
+        reply_markup=keyboard.as_markup(resize_keyboard=True),
+        parse_mode="Markdown"
     )
-    
-    # Continuar a selección de báscula
-    await preguntar_bascula(message, state)
+    await state.set_state(ConductoresState.confirmar_peso)
 
 @dp.message(ConductoresState.factura_foto)
 async def factura_foto_no_valida(message: types.Message, state: FSMContext):
