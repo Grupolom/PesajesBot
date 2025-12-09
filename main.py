@@ -1388,10 +1388,10 @@ async def procesar_menu_conductores(message: types.Message, state: FSMContext):
     )
     await state.set_state(ConductoresState.cedula)
 
-# Handler para Peso Vacío - selección de tipo de carga (NO pide cédula, va directo a báscula)
+# Handler para Peso Vacío - selección de tipo de carga (NO pide cédula, va directo a peso)
 @dp.message(ConductoresState.peso_vacio_tipo_carga)
 async def procesar_peso_vacio_tipo_carga(message: types.Message, state: FSMContext):
-    """Procesa qué entregó o va a cargar en peso vacío - luego va directo a báscula"""
+    """Procesa qué entregó o va a cargar en peso vacío - luego va directo a peso"""
     texto = message.text.strip().lower()
 
     tipo_carga_referencia = None
@@ -1405,26 +1405,17 @@ async def procesar_peso_vacio_tipo_carga(message: types.Message, state: FSMConte
         await message.answer("⚠️ Opción no válida. Por favor seleccione una de las opciones.")
         return
 
-    await state.update_data(tipo_carga_referencia=tipo_carga_referencia)
+    await state.update_data(tipo_carga_referencia=tipo_carga_referencia, bascula="Peso Vacío")
 
-    # Para Peso Vacío: NO pedir cédula ni placa, ir directo a selección de báscula
-    keyboard = ReplyKeyboardBuilder()
-    keyboard.button(text="1. Báscula Italcol")
-    keyboard.button(text="2. Bogotá")
-    keyboard.button(text="3. Finca Tranquera")
-    keyboard.adjust(1)
-
+    # Para Peso Vacío: ir directo a pedir peso (sin báscula)
     await message.answer(
         f"✅ Referencia: *{tipo_carga_referencia}*\n\n"
-        "🏢 *Seleccione la báscula donde se pesará:*\n\n"
-        "1️⃣ Báscula Italcol\n"
-        "2️⃣ Bogotá\n"
-        "3️⃣ Finca Tranquera\n\n"
-        "Seleccione una opción:",
-        reply_markup=keyboard.as_markup(resize_keyboard=True),
+        "⚖️ *¿Cuánto pesa?* _(en kilogramos)_\n\n"
+        "Puede usar decimales con coma o punto:",
+        reply_markup=types.ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
-    await state.set_state(ConductoresState.bascula)
+    await state.set_state(ConductoresState.peso)
 
 # ==================== NUEVO FLUJO CONDUCTORES ==================== #
 
