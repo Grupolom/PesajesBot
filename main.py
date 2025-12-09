@@ -416,37 +416,57 @@ def validar_peso(valor):
 
 # ==================== VALIDACIONES OPERARIO SITIO 3 ==================== #
 def validar_cedula_sitio3(valor: str) -> bool:
-    """Valida cédula para Sitio 3: solo números, 6-12 dígitos"""
+    """Valida cédula: solo números, 4-12 dígitos (4 para cédulas de prueba)"""
     if not valor.isdigit():
         return False
-    if len(valor) < 6 or len(valor) > 12:
+    if len(valor) < 4 or len(valor) > 12:
         return False
     return True
 
-async def validar_operario_en_sistema(cedula: str) -> tuple[bool, str]:
+async def validar_operario_en_sistema(cedula: str, flujo_requerido: str = None) -> tuple[bool, str, str]:
     """
     Valida si la cédula existe en la tabla operarios_para_flujo.
-    Retorna: (existe, nombre_operario)
+    Si se especifica flujo_requerido, también valida que el operario tenga acceso a ese flujo.
+
+    Retorna: (existe, nombre_operario, mensaje_error)
+    - Si existe y tiene acceso: (True, nombre, "")
+    - Si existe pero no tiene acceso: (False, "", "mensaje de error")
+    - Si no existe: (False, "", "")
     """
     conn = None
     try:
         conn = await get_db_connection()
         if not conn:
             print("⚠️ No se pudo conectar a BD para validar operario")
-            return False, ""
+            return False, "", ""
 
         resultado = await conn.fetchrow('''
-            SELECT persona FROM operarios_para_flujo WHERE identificacion = $1
+            SELECT persona, flujo FROM operarios_para_flujo WHERE identificacion = $1
         ''', cedula)
 
         if resultado:
-            return True, resultado['persona']
+            nombre = resultado['persona']
+            flujo_operario = resultado['flujo'] or ""
+
+            # Si se requiere validar flujo
+            if flujo_requerido:
+                # "Todos" tiene acceso a cualquier flujo
+                if flujo_operario.lower() == "todos":
+                    return True, nombre, ""
+                # Verificar si el flujo coincide
+                elif flujo_operario.lower() == flujo_requerido.lower():
+                    return True, nombre, ""
+                else:
+                    # No tiene acceso a este flujo
+                    return False, "", f"No tienes acceso a {flujo_requerido}. Tu flujo asignado es: {flujo_operario}"
+            else:
+                return True, nombre, ""
         else:
-            return False, ""
+            return False, "", ""
 
     except Exception as e:
         print(f"❌ Error validando operario en sistema: {e}")
-        return False, ""
+        return False, "", ""
     finally:
         if conn:
             await release_db_connection(conn)
@@ -2525,19 +2545,27 @@ async def procesar_cedula_sitio1(message: types.Message, state: FSMContext):
     if not validar_cedula_sitio3(cedula):
         await message.answer(
             "⚠️ Cédula inválida.\n\n"
-            "Debe contener solo números y tener entre 6 y 12 dígitos.\n\n"
+            "Debe contener solo números (4-12 dígitos).\n\n"
             "Por favor, intente nuevamente:"
         )
         return
 
-    # Validar contra la tabla operarios_para_flujo
-    existe, nombre = await validar_operario_en_sistema(cedula)
+    # Validar contra la tabla operarios_para_flujo con flujo "Sitio 1"
+    existe, nombre, error_flujo = await validar_operario_en_sistema(cedula, "Sitio 1")
 
     if not existe:
-        await message.answer(
-            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
-            "Ingresa nuevamente:"
-        )
+        if error_flujo:
+            # Cédula existe pero no tiene acceso a este flujo
+            await message.answer(
+                f"❌ {error_flujo}\n\n"
+                "Ingresa otra cédula:"
+            )
+        else:
+            # Cédula no existe en el sistema
+            await message.answer(
+                "❌ Cédula incorrecta, no estás en el sistema.\n\n"
+                "Ingresa nuevamente:"
+            )
         return
 
     # Guardar cédula y nombre del operario
@@ -3107,19 +3135,19 @@ async def sitio3_get_cedula(message: types.Message, state: FSMContext):
     if not validar_cedula_sitio3(cedula):
         await message.answer(
             "⚠️ Cédula inválida.\n\n"
-            "Debe contener solo números y tener entre 6 y 12 dígitos.\n\n"
+            "Debe contener solo números (4-12 dígitos).\n\n"
             "Por favor, intente nuevamente:"
         )
         return
 
-    # Validar contra la tabla operarios_para_flujo
-    existe, nombre = await validar_operario_en_sistema(cedula)
+    # Validar contra la tabla operarios_para_flujo con flujo "Sitio 3"
+    existe, nombre, error_flujo = await validar_operario_en_sistema(cedula, "Sitio 3")
 
     if not existe:
-        await message.answer(
-            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
-            "Ingresa nuevamente:"
-        )
+        if error_flujo:
+            await message.answer(f"❌ {error_flujo}\n\nIngresa otra cédula:")
+        else:
+            await message.answer("❌ Cédula incorrecta, no estás en el sistema.\n\nIngresa nuevamente:")
         return
 
     # Guardar cédula y nombre del operario
@@ -3466,19 +3494,19 @@ async def descarga_get_cedula(message: types.Message, state: FSMContext):
     if not validar_cedula_sitio3(cedula):
         await message.answer(
             "⚠️ Cédula inválida.\n\n"
-            "Debe contener solo números y tener entre 6 y 12 dígitos.\n\n"
+            "Debe contener solo números (4-12 dígitos).\n\n"
             "Por favor, intente nuevamente:"
         )
         return
 
-    # Validar contra la tabla operarios_para_flujo
-    existe, nombre = await validar_operario_en_sistema(cedula)
+    # Validar contra la tabla operarios_para_flujo con flujo "Sitio 3"
+    existe, nombre, error_flujo = await validar_operario_en_sistema(cedula, "Sitio 3")
 
     if not existe:
-        await message.answer(
-            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
-            "Ingresa nuevamente:"
-        )
+        if error_flujo:
+            await message.answer(f"❌ {error_flujo}\n\nIngresa otra cédula:")
+        else:
+            await message.answer("❌ Cédula incorrecta, no estás en el sistema.\n\nIngresa nuevamente:")
         return
 
     # Guardar cédula y nombre del operario
@@ -3835,19 +3863,19 @@ async def medicion_get_cedula(message: types.Message, state: FSMContext):
     if not validar_cedula_sitio3(cedula):
         await message.answer(
             "⚠️ Cédula inválida.\n\n"
-            "Debe contener solo números y tener entre 6 y 12 dígitos.\n\n"
+            "Debe contener solo números (4-12 dígitos).\n\n"
             "Por favor, intente nuevamente:"
         )
         return
 
-    # Validar contra la tabla operarios_para_flujo
-    existe, nombre = await validar_operario_en_sistema(cedula)
+    # Validar contra la tabla operarios_para_flujo con flujo "Sitio 3"
+    existe, nombre, error_flujo = await validar_operario_en_sistema(cedula, "Sitio 3")
 
     if not existe:
-        await message.answer(
-            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
-            "Ingresa nuevamente:"
-        )
+        if error_flujo:
+            await message.answer(f"❌ {error_flujo}\n\nIngresa otra cédula:")
+        else:
+            await message.answer("❌ Cédula incorrecta, no estás en el sistema.\n\nIngresa nuevamente:")
         return
 
     # Guardar cédula y nombre del operario
@@ -4280,14 +4308,14 @@ async def celdas_get_cedula(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Ingrese solo números (sin letras ni símbolos).")
         return
 
-    # Validar contra la tabla operarios_para_flujo
-    existe, nombre = await validar_operario_en_sistema(cedula)
+    # Validar contra la tabla operarios_para_flujo con flujo "Sitio 3"
+    existe, nombre, error_flujo = await validar_operario_en_sistema(cedula, "Sitio 3")
 
     if not existe:
-        await message.answer(
-            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
-            "Ingresa nuevamente:"
-        )
+        if error_flujo:
+            await message.answer(f"❌ {error_flujo}\n\nIngresa otra cédula:")
+        else:
+            await message.answer("❌ Cédula incorrecta, no estás en el sistema.\n\nIngresa nuevamente:")
         return
 
     # Guardar cédula y nombre del operario
@@ -4563,14 +4591,14 @@ async def combustible_get_cedula(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Ingrese solo números (sin letras ni símbolos).")
         return
 
-    # Validar contra la tabla operarios_para_flujo
-    existe, nombre = await validar_operario_en_sistema(cedula)
+    # Validar contra la tabla operarios_para_flujo con flujo "Sitio 3"
+    existe, nombre, error_flujo = await validar_operario_en_sistema(cedula, "Sitio 3")
 
     if not existe:
-        await message.answer(
-            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
-            "Ingresa nuevamente:"
-        )
+        if error_flujo:
+            await message.answer(f"❌ {error_flujo}\n\nIngresa otra cédula:")
+        else:
+            await message.answer("❌ Cédula incorrecta, no estás en el sistema.\n\nIngresa nuevamente:")
         return
 
     # Guardar cédula y nombre del operario
@@ -5149,14 +5177,14 @@ async def traslado_get_cedula(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Ingrese solo números (sin letras ni símbolos).")
         return
 
-    # Validar contra la tabla operarios_para_flujo
-    existe, nombre = await validar_operario_en_sistema(cedula)
+    # Validar contra la tabla operarios_para_flujo con flujo "Sitio 3"
+    existe, nombre, error_flujo = await validar_operario_en_sistema(cedula, "Sitio 3")
 
     if not existe:
-        await message.answer(
-            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
-            "Ingresa nuevamente:"
-        )
+        if error_flujo:
+            await message.answer(f"❌ {error_flujo}\n\nIngresa otra cédula:")
+        else:
+            await message.answer("❌ Cédula incorrecta, no estás en el sistema.\n\nIngresa nuevamente:")
         return
 
     # Guardar cédula y nombre del operario
