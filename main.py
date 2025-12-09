@@ -267,8 +267,10 @@ class RegistroState(StatesGroup):
     combustible_cedula = State()
     combustible_confirmar_cedula = State()
     combustible_tipo = State()
-    combustible_confirmar_tipo = State()
-    combustible_equipo = State()  # Planta 1, Planta 2, Can-am, Vehiculos, Equipos
+    combustible_entrada_salida = State()  # NUEVO: ¿Es entrada o salida?
+    combustible_galones = State()  # NUEVO: ¿Cuántos galones?
+    combustible_confirmar_galones = State()  # NUEVO: Confirmar galones
+    combustible_equipo = State()  # Planta 1, Planta 2, Can-am, Vehiculos, Equipos (solo salida)
     combustible_confirmar_equipo = State()
     combustible_placa = State()  # Solo si eligió Vehículos
     combustible_confirmar_placa = State()
@@ -1320,18 +1322,16 @@ async def menu_conductores(message: types.Message, state: FSMContext):
     keyboard.button(text="1. Lechones")
     keyboard.button(text="2. Concentrado")
     keyboard.button(text="3. Cerdos Gordos")
-    keyboard.button(text="4. Combustible")
-    keyboard.button(text="5. Peso Vacío")
-    keyboard.adjust(2, 2, 1)
-    
+    keyboard.button(text="4. Peso Vacío")
+    keyboard.adjust(2, 2)
+
     await message.answer(
         "🚛 *CONDUCTORES - REGISTRO DE PESAJE*\n\n"
         "¿Qué va a transportar?\n\n"
         "1️⃣ Lechones (cerdos pequeños)\n"
         "2️⃣ Concentrado (alimento)\n"
         "3️⃣ Cerdos Gordos (para venta)\n"
-        "4️⃣ Combustible (diesel/corriente)\n"
-        "5️⃣ Peso Vacío\n\n"
+        "4️⃣ Peso Vacío\n\n"
         "Seleccione una opción:",
         reply_markup=keyboard.as_markup(resize_keyboard=True),
         parse_mode="Markdown"
@@ -1343,8 +1343,8 @@ async def menu_conductores(message: types.Message, state: FSMContext):
 async def procesar_menu_conductores(message: types.Message, state: FSMContext):
     """Procesa la selección del menú de conductores"""
     texto = message.text.strip().lower()
-    
-    # Opciones 1-4: Guardar tipo de carga y pedir cédula
+
+    # Opciones 1-3: Guardar tipo de carga y pedir cédula
     tipo_carga = None
     if "1" in texto or "lechon" in texto:
         tipo_carga = "Lechones"
@@ -1352,26 +1352,22 @@ async def procesar_menu_conductores(message: types.Message, state: FSMContext):
         tipo_carga = "Concentrado"
     elif "3" in texto or "cerdo" in texto or "gordo" in texto:
         tipo_carga = "Cerdos Gordos"
-    elif "4" in texto or "combustible" in texto:
-        tipo_carga = "Combustible"
-    elif "5" in texto or "vac" in texto:
-        # Opción 5: Peso Vacío - flujo diferente
+    elif "4" in texto or "vac" in texto:
+        # Opción 4: Peso Vacío - flujo diferente (NO pide cédula ni placa)
         await state.update_data(tipo_carga="Peso Vacío", es_peso_vacio=True)
-        
+
         keyboard = ReplyKeyboardBuilder()
         keyboard.button(text="1. Lechones")
         keyboard.button(text="2. Concentrado")
         keyboard.button(text="3. Cerdos Gordos")
-        keyboard.button(text="4. Combustible")
-        keyboard.adjust(2, 2)
-        
+        keyboard.adjust(2, 1)
+
         await message.answer(
             "🚛 *PESO VACÍO*\n\n"
             "¿Qué entregó o qué va a cargar?\n\n"
             "1️⃣ Lechones\n"
             "2️⃣ Concentrado\n"
-            "3️⃣ Cerdos Gordos\n"
-            "4️⃣ Combustible\n\n"
+            "3️⃣ Cerdos Gordos\n\n"
             "Seleccione una opción:",
             reply_markup=keyboard.as_markup(resize_keyboard=True),
             parse_mode="Markdown"
@@ -1381,8 +1377,8 @@ async def procesar_menu_conductores(message: types.Message, state: FSMContext):
     else:
         await message.answer("⚠️ Opción no válida. Por favor seleccione una de las opciones del menú.")
         return
-    
-    # Para opciones 1-4: guardar tipo y pedir cédula
+
+    # Para opciones 1-3: guardar tipo y pedir cédula
     await state.update_data(tipo_carga=tipo_carga, es_peso_vacio=False)
     await message.answer(
         f"✅ Tipo de carga: *{tipo_carga}*\n\n"
@@ -1392,12 +1388,12 @@ async def procesar_menu_conductores(message: types.Message, state: FSMContext):
     )
     await state.set_state(ConductoresState.cedula)
 
-# Handler para Peso Vacío - selección de tipo de carga
+# Handler para Peso Vacío - selección de tipo de carga (NO pide cédula, va directo a báscula)
 @dp.message(ConductoresState.peso_vacio_tipo_carga)
 async def procesar_peso_vacio_tipo_carga(message: types.Message, state: FSMContext):
-    """Procesa qué entregó o va a cargar en peso vacío"""
+    """Procesa qué entregó o va a cargar en peso vacío - luego va directo a báscula"""
     texto = message.text.strip().lower()
-    
+
     tipo_carga_referencia = None
     if "1" in texto or "lechon" in texto:
         tipo_carga_referencia = "Lechones"
@@ -1405,20 +1401,30 @@ async def procesar_peso_vacio_tipo_carga(message: types.Message, state: FSMConte
         tipo_carga_referencia = "Concentrado"
     elif "3" in texto or "cerdo" in texto or "gordo" in texto:
         tipo_carga_referencia = "Cerdos Gordos"
-    elif "4" in texto or "combustible" in texto:
-        tipo_carga_referencia = "Combustible"
     else:
         await message.answer("⚠️ Opción no válida. Por favor seleccione una de las opciones.")
         return
-    
+
     await state.update_data(tipo_carga_referencia=tipo_carga_referencia)
+
+    # Para Peso Vacío: NO pedir cédula ni placa, ir directo a selección de báscula
+    keyboard = ReplyKeyboardBuilder()
+    keyboard.button(text="1. Báscula Italcol")
+    keyboard.button(text="2. Bogotá")
+    keyboard.button(text="3. Finca Tranquera")
+    keyboard.adjust(1)
+
     await message.answer(
         f"✅ Referencia: *{tipo_carga_referencia}*\n\n"
-        f"Por favor, ingrese su *cédula*:",
-        reply_markup=ReplyKeyboardRemove(),
+        "🏢 *Seleccione la báscula donde se pesará:*\n\n"
+        "1️⃣ Báscula Italcol\n"
+        "2️⃣ Bogotá\n"
+        "3️⃣ Finca Tranquera\n\n"
+        "Seleccione una opción:",
+        reply_markup=keyboard.as_markup(resize_keyboard=True),
         parse_mode="Markdown"
     )
-    await state.set_state(ConductoresState.cedula)
+    await state.set_state(ConductoresState.bascula)
 
 # ==================== NUEVO FLUJO CONDUCTORES ==================== #
 
@@ -4617,50 +4623,212 @@ async def combustible_confirmar_cedula_invalido(message: types.Message, state: F
 
 @dp.message(RegistroState.combustible_tipo)
 async def combustible_seleccionar_tipo(message: types.Message, state: FSMContext):
-    """Procesar tipo de combustible y mostrar opciones según el tipo"""
+    """Procesar tipo de combustible y preguntar si es entrada o salida"""
     texto = message.text.lower()
 
     if "diesel" in texto:
         tipo = "Diesel"
-        await state.update_data(combustible_tipo=tipo)
-
-        # Opciones para Diesel: Planta 1, Planta 2, Otros
-        builder = ReplyKeyboardBuilder()
-        builder.add(types.KeyboardButton(text="🔧 Planta 1"))
-        builder.add(types.KeyboardButton(text="🔧 Planta 2"))
-        builder.add(types.KeyboardButton(text="⚙️ Otros"))
-        builder.adjust(2)
-
-        await message.answer(
-            "🚜 *¿Qué equipo o maquinaria va a tanquear?*\n\n"
-            "Seleccione una opción:",
-            parse_mode="Markdown",
-            reply_markup=builder.as_markup(resize_keyboard=True)
-        )
-        await state.set_state(RegistroState.combustible_equipo)
-
     elif "gasolina" in texto:
         tipo = "Gasolina"
-        await state.update_data(combustible_tipo=tipo)
-
-        # Opciones para Gasolina: Can-am, Vehículos, Equipos
-        builder = ReplyKeyboardBuilder()
-        builder.add(types.KeyboardButton(text="🏍️ Can-am"))
-        builder.add(types.KeyboardButton(text="🚗 Vehículos"))
-        builder.add(types.KeyboardButton(text="⚙️ Equipos"))
-        builder.adjust(2)
-
-        await message.answer(
-            "🚜 *¿Qué equipo o maquinaria va a tanquear?*\n\n"
-            "Seleccione una opción:",
-            parse_mode="Markdown",
-            reply_markup=builder.as_markup(resize_keyboard=True)
-        )
-        await state.set_state(RegistroState.combustible_equipo)
-
     else:
         await message.answer("⚠️ Por favor seleccione Diesel o Gasolina usando los botones.")
         return
+
+    await state.update_data(combustible_tipo=tipo)
+
+    # Preguntar si es entrada o salida
+    builder = ReplyKeyboardBuilder()
+    builder.add(types.KeyboardButton(text="📥 Entrada"))
+    builder.add(types.KeyboardButton(text="📤 Salida"))
+    builder.adjust(2)
+
+    await message.answer(
+        f"✅ Tipo: *{tipo}*\n\n"
+        "📦 *¿Es una entrada o una salida?*\n\n"
+        "📥 *Entrada*: Recepción de combustible\n"
+        "📤 *Salida*: Tanqueo de equipo/vehículo\n\n"
+        "Seleccione una opción:",
+        parse_mode="Markdown",
+        reply_markup=builder.as_markup(resize_keyboard=True)
+    )
+    await state.set_state(RegistroState.combustible_entrada_salida)
+
+@dp.message(RegistroState.combustible_entrada_salida)
+async def combustible_entrada_o_salida(message: types.Message, state: FSMContext):
+    """Procesar si es entrada o salida y preguntar galones"""
+    texto = message.text.lower()
+
+    if "entrada" in texto:
+        es_entrada = True
+        tipo_movimiento = "Entrada"
+    elif "salida" in texto:
+        es_entrada = False
+        tipo_movimiento = "Salida"
+    else:
+        await message.answer("⚠️ Por favor seleccione Entrada o Salida usando los botones.")
+        return
+
+    await state.update_data(combustible_es_entrada=es_entrada, combustible_tipo_movimiento=tipo_movimiento)
+
+    await message.answer(
+        f"✅ Tipo de movimiento: *{tipo_movimiento}*\n\n"
+        "⛽ *¿Cuántos galones de combustible?*\n\n"
+        "Ingrese la cantidad de galones:",
+        parse_mode="Markdown",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await state.set_state(RegistroState.combustible_galones)
+
+@dp.message(RegistroState.combustible_galones)
+async def combustible_get_galones(message: types.Message, state: FSMContext):
+    """Obtener cantidad de galones"""
+    texto = message.text.strip().replace(",", ".")
+
+    try:
+        galones = float(texto)
+        if galones <= 0:
+            await message.answer("⚠️ La cantidad debe ser mayor a 0.\n\nIngrese la cantidad de galones:")
+            return
+        if galones > 10000:
+            await message.answer("⚠️ La cantidad no puede superar 10,000 galones.\n\nIngrese la cantidad de galones:")
+            return
+    except ValueError:
+        await message.answer("⚠️ Ingrese un número válido.\n\nIngrese la cantidad de galones:")
+        return
+
+    galones = round(galones, 2)
+    await state.update_data(combustible_galones=galones)
+
+    builder = ReplyKeyboardBuilder()
+    builder.add(types.KeyboardButton(text="1"))
+    builder.add(types.KeyboardButton(text="2"))
+    builder.adjust(2)
+
+    await message.answer(
+        f"⛽ Galones ingresados: *{galones:,.2f}*\n\n"
+        "¿Es correcto?\n\n"
+        "1️⃣ Sí, confirmar\n"
+        "2️⃣ No, editar\n\n"
+        "Escriba el número de la opción:",
+        parse_mode="Markdown",
+        reply_markup=builder.as_markup(resize_keyboard=True)
+    )
+    await state.set_state(RegistroState.combustible_confirmar_galones)
+
+@dp.message(RegistroState.combustible_confirmar_galones, F.text == "1")
+async def combustible_confirmar_galones_si(message: types.Message, state: FSMContext):
+    """Confirmar galones y decidir siguiente paso según entrada/salida"""
+    data = await state.get_data()
+    es_entrada = data.get('combustible_es_entrada', False)
+    tipo_combustible = data.get('combustible_tipo')
+
+    if es_entrada:
+        # ENTRADA: Guardar registro y finalizar (flujo corto)
+        await guardar_registro_combustible_entrada(message, state)
+    else:
+        # SALIDA: Continuar con selección de equipo/maquinaria
+        if tipo_combustible == "Diesel":
+            builder = ReplyKeyboardBuilder()
+            builder.add(types.KeyboardButton(text="🔧 Planta 1"))
+            builder.add(types.KeyboardButton(text="🔧 Planta 2"))
+            builder.add(types.KeyboardButton(text="⚙️ Otros"))
+            builder.adjust(2)
+
+            await message.answer(
+                "🚜 *¿Qué equipo o maquinaria va a tanquear?*\n\n"
+                "Seleccione una opción:",
+                parse_mode="Markdown",
+                reply_markup=builder.as_markup(resize_keyboard=True)
+            )
+        else:  # Gasolina
+            builder = ReplyKeyboardBuilder()
+            builder.add(types.KeyboardButton(text="🏍️ Can-am"))
+            builder.add(types.KeyboardButton(text="🚗 Vehículos"))
+            builder.add(types.KeyboardButton(text="⚙️ Equipos"))
+            builder.adjust(2)
+
+            await message.answer(
+                "🚜 *¿Qué equipo o maquinaria va a tanquear?*\n\n"
+                "Seleccione una opción:",
+                parse_mode="Markdown",
+                reply_markup=builder.as_markup(resize_keyboard=True)
+            )
+        await state.set_state(RegistroState.combustible_equipo)
+
+@dp.message(RegistroState.combustible_confirmar_galones, F.text == "2")
+async def combustible_confirmar_galones_no(message: types.Message, state: FSMContext):
+    """Editar cantidad de galones"""
+    await message.answer(
+        "⛽ *¿Cuántos galones de combustible?*\n\n"
+        "Ingrese la cantidad de galones:",
+        parse_mode="Markdown",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await state.set_state(RegistroState.combustible_galones)
+
+@dp.message(RegistroState.combustible_confirmar_galones)
+async def combustible_confirmar_galones_invalido(message: types.Message, state: FSMContext):
+    await message.answer("⚠️ Por favor seleccione 1 o 2.")
+
+async def guardar_registro_combustible_entrada(message: types.Message, state: FSMContext):
+    """Guardar registro de ENTRADA de combustible (flujo corto)"""
+    data = await state.get_data()
+    cedula = data.get('combustible_cedula')
+    tipo = data.get('combustible_tipo')
+    galones = data.get('combustible_galones')
+    tipo_movimiento = "Entrada"
+
+    # Guardar en base de datos
+    conn = None
+    try:
+        conn = await get_db_connection()
+        if conn:
+            session_id = str(uuid.uuid4())
+            await conn.execute('''
+                INSERT INTO operario_sitio3_combustible
+                (cedula_operario, tipo_combustible, tipo_movimiento, galones, equipo_maquinaria, placa_vehiculo, nombre_equipo, centro_costo, session_id, telegram_user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ''', cedula, tipo, tipo_movimiento, galones, None, None, None, None, session_id, message.from_user.id)
+            print(f"✅ Registro de ENTRADA de combustible guardado: {galones} galones de {tipo}")
+    except Exception as e:
+        print(f"⚠️ Error guardando registro de combustible: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        if conn:
+            await release_db_connection(conn)
+
+    # Enviar notificación al grupo
+    if GROUP_CHAT_ID:
+        try:
+            fecha_hora = datetime.now().strftime("%d/%m/%Y %H:%M")
+            mensaje_grupo = (
+                "📥 *ENTRADA DE COMBUSTIBLE - SITIO 3*\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"👤 Cédula: {cedula}\n"
+                f"⛽ Tipo: {tipo}\n"
+                f"📦 Galones recibidos: {galones:,.2f}\n"
+                f"📅 Fecha: {fecha_hora}\n"
+                "━━━━━━━━━━━━━━━━━━━━"
+            )
+            await bot.send_message(GROUP_CHAT_ID, mensaje_grupo, parse_mode="Markdown")
+        except Exception as e:
+            print(f"⚠️ Error enviando notificación al grupo: {e}")
+
+    # Mostrar resumen al usuario
+    resumen = (
+        "✅ *Entrada de combustible registrada exitosamente*\n\n"
+        "📊 *Resumen:*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"• Tipo: {tipo}\n"
+        f"• Movimiento: Entrada (Recepción)\n"
+        f"• Galones: {galones:,.2f}\n"
+        "━━━━━━━━━━━━━━━━━━━━"
+    )
+
+    await message.answer(resumen, parse_mode="Markdown", reply_markup=types.ReplyKeyboardRemove())
+    await asyncio.sleep(1)
+    await finalizar_flujo(message, state)
 
 @dp.message(RegistroState.combustible_equipo)
 async def combustible_seleccionar_equipo(message: types.Message, state: FSMContext):
@@ -4875,14 +5043,16 @@ async def combustible_seleccionar_centro(message: types.Message, state: FSMConte
 
 @dp.message(RegistroState.combustible_confirmar_centro_costo, F.text == "1")
 async def combustible_confirmar_centro_si(message: types.Message, state: FSMContext):
-    """Confirmar centro de costo y guardar registro"""
+    """Confirmar centro de costo y guardar registro de SALIDA"""
     data = await state.get_data()
     cedula = data.get('combustible_cedula')
     tipo = data.get('combustible_tipo')
+    galones = data.get('combustible_galones')
     equipo = data.get('combustible_equipo')
     placa = data.get('combustible_placa')
     nombre_equipo = data.get('combustible_nombre_equipo')
     centro_costo = data.get('combustible_centro_costo')
+    tipo_movimiento = "Salida"
 
     # Guardar en base de datos
     conn = None
@@ -4892,10 +5062,10 @@ async def combustible_confirmar_centro_si(message: types.Message, state: FSMCont
             session_id = str(uuid.uuid4())
             await conn.execute('''
                 INSERT INTO operario_sitio3_combustible
-                (cedula_operario, tipo_combustible, equipo_maquinaria, placa_vehiculo, nombre_equipo, centro_costo, session_id, telegram_user_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            ''', cedula, tipo, equipo, placa, nombre_equipo, centro_costo, session_id, message.from_user.id)
-            print(f"✅ Registro de combustible guardado")
+                (cedula_operario, tipo_combustible, tipo_movimiento, galones, equipo_maquinaria, placa_vehiculo, nombre_equipo, centro_costo, session_id, telegram_user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ''', cedula, tipo, tipo_movimiento, galones, equipo, placa, nombre_equipo, centro_costo, session_id, message.from_user.id)
+            print(f"✅ Registro de SALIDA de combustible guardado: {galones} galones de {tipo}")
     except Exception as e:
         print(f"⚠️ Error guardando registro de combustible: {e}")
         import traceback
@@ -4918,10 +5088,11 @@ async def combustible_confirmar_centro_si(message: types.Message, state: FSMCont
                 detalle_equipo = f"⚙️ {equipo}"
 
             mensaje_grupo = (
-                "⛽ *REGISTRO DE COMBUSTIBLE - SITIO 3*\n"
+                "📤 *SALIDA DE COMBUSTIBLE - SITIO 3*\n"
                 "━━━━━━━━━━━━━━━━━━━━\n\n"
                 f"👤 Cédula: {cedula}\n"
                 f"⛽ Tipo: {tipo}\n"
+                f"📦 Galones despachados: {galones:,.2f}\n"
                 f"{detalle_equipo}\n"
                 f"📍 Centro de Costo: {centro_costo}\n"
                 f"📅 Fecha: {fecha_hora}\n"
@@ -4940,10 +5111,12 @@ async def combustible_confirmar_centro_si(message: types.Message, state: FSMCont
         detalle = equipo
 
     resumen = (
-        "✅ *Registro de combustible guardado exitosamente*\n\n"
+        "✅ *Salida de combustible registrada exitosamente*\n\n"
         "📊 *Resumen:*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         f"• Tipo: {tipo}\n"
+        f"• Movimiento: Salida (Tanqueo)\n"
+        f"• Galones: {galones:,.2f}\n"
         f"• Equipo: {detalle}\n"
         f"• Centro de costo: {centro_costo}\n"
         "━━━━━━━━━━━━━━━━━━━━"
