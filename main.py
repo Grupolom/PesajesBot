@@ -1407,11 +1407,10 @@ async def procesar_peso_vacio_tipo_carga(message: types.Message, state: FSMConte
 
     await state.update_data(tipo_carga_referencia=tipo_carga_referencia, bascula="Peso Vacío")
 
-    # Para Peso Vacío: ir directo a pedir peso (sin báscula)
+    # Para Peso Vacío: ir directo a pedir peso
     await message.answer(
         f"✅ Referencia: *{tipo_carga_referencia}*\n\n"
-        "⚖️ *¿Cuánto pesa?* _(en kilogramos)_\n\n"
-        "Puede usar decimales con coma o punto:",
+        "Ponga el peso de báscula:",
         reply_markup=types.ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
@@ -2163,13 +2162,21 @@ async def confirmar_peso_input(message: types.Message, state: FSMContext):
     if "1" in texto or "confirmar" in texto:
         data = await state.get_data()
         peso = data.get("peso_temp")
+        es_peso_vacio = data.get("es_peso_vacio", False)
         await state.update_data(peso=peso)
-        
-        await message.answer(
-            f"✅ Peso: *{peso:,.2f} kg*\n\n"
-            f"📸 Ahora envíe una *foto del pesaje*:",
-            parse_mode="Markdown"
-        )
+
+        if es_peso_vacio:
+            await message.answer(
+                f"✅ Peso: *{peso:,.2f} kg*\n\n"
+                f"Ponga foto de báscula:",
+                parse_mode="Markdown"
+            )
+        else:
+            await message.answer(
+                f"✅ Peso: *{peso:,.2f} kg*\n\n"
+                f"📸 Ahora envíe una *foto del pesaje*:",
+                parse_mode="Markdown"
+            )
         await state.set_state(ConductoresState.foto_pesaje)
     else:
         await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
