@@ -1819,7 +1819,7 @@ async def confirmar_numero_factura(message: types.Message, state: FSMContext):
         # Preguntar tipo de alimento
         keyboard = ReplyKeyboardBuilder()
         keyboard.button(text="1. Levante")
-        keyboard.button(text="2. Engorde/Medicado")
+        keyboard.button(text="2. Engorde / Levante 3 medicado")
         keyboard.button(text="3. Finalizador")
         keyboard.adjust(1)
         
@@ -1828,7 +1828,7 @@ async def confirmar_numero_factura(message: types.Message, state: FSMContext):
             f"✅ Número de factura: *{numero}*\n\n"
             f"📋 Seleccione el *tipo de alimento*:\n\n"
             f"1️⃣ *Levante*\n"
-            f"2️⃣ *Engorde/Medicado*\n"
+            f"2️⃣ *Engorde / Levante 3 medicado*\n"
             f"3️⃣ *Finalizador*",
             reply_markup=keyboard.as_markup(resize_keyboard=True),
             parse_mode="Markdown"
@@ -1850,7 +1850,7 @@ async def procesar_tipo_alimento(message: types.Message, state: FSMContext):
     if "1" in texto or "levante" in texto:
         tipo = "Levante"
     elif "2" in texto or "engorde" in texto or "medicado" in texto:
-        tipo = "Engorde/Medicado"
+        tipo = "Engorde / Levante 3 medicado"
     elif "3" in texto or "finalizador" in texto:
         tipo = "Finalizador"
     else:
@@ -1858,7 +1858,7 @@ async def procesar_tipo_alimento(message: types.Message, state: FSMContext):
             "⚠️ Opción no válida.\n\n"
             "Seleccione:\n"
             "1️⃣ Levante\n"
-            "2️⃣ Engorde/Medicado\n"
+            "2️⃣ Engorde / Levante 3 medicado\n"
             "3️⃣ Finalizador"
         )
         return
@@ -1875,14 +1875,14 @@ async def confirmar_tipo_alimento(message: types.Message, state: FSMContext):
     if "2" in texto or "modificar" in texto:
         keyboard = ReplyKeyboardBuilder()
         keyboard.button(text="1. Levante")
-        keyboard.button(text="2. Engorde/Medicado")
+        keyboard.button(text="2. Engorde / Levante 3 medicado")
         keyboard.button(text="3. Finalizador")
         keyboard.adjust(1)
         
         await message.answer(
             "✏️ Seleccione nuevamente el *tipo de alimento*:\n\n"
             f"1️⃣ *Levante*\n"
-            f"2️⃣ *Engorde/Medicado*\n"
+            f"2️⃣ *Engorde / Levante 3 medicado*\n"
             f"3️⃣ *Finalizador*",
             reply_markup=keyboard.as_markup(resize_keyboard=True),
             parse_mode="Markdown"
