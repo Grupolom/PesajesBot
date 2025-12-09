@@ -423,6 +423,34 @@ def validar_cedula_sitio3(valor: str) -> bool:
         return False
     return True
 
+async def validar_operario_en_sistema(cedula: str) -> tuple[bool, str]:
+    """
+    Valida si la cédula existe en la tabla operarios_para_flujo.
+    Retorna: (existe, nombre_operario)
+    """
+    conn = None
+    try:
+        conn = await get_db_connection()
+        if not conn:
+            print("⚠️ No se pudo conectar a BD para validar operario")
+            return False, ""
+
+        resultado = await conn.fetchrow('''
+            SELECT persona FROM operarios_para_flujo WHERE identificacion = $1
+        ''', cedula)
+
+        if resultado:
+            return True, resultado['persona']
+        else:
+            return False, ""
+
+    except Exception as e:
+        print(f"❌ Error validando operario en sistema: {e}")
+        return False, ""
+    finally:
+        if conn:
+            await release_db_connection(conn)
+
 def validar_numero_banda(valor: str) -> tuple[bool, str, str]:
     """
     Valida número de banda: acepta cualquier texto (números, letras, guiones, etc.)
@@ -2491,7 +2519,7 @@ async def enviar_notificacion_grupo_conductor(data: dict):
 
 @dp.message(OperarioSitio1State.cedula)
 async def procesar_cedula_sitio1(message: types.Message, state: FSMContext):
-    """Procesa la cédula del operario"""
+    """Procesa la cédula del operario - valida contra operarios_para_flujo"""
     cedula = message.text.strip()
 
     if not validar_cedula_sitio3(cedula):
@@ -2502,22 +2530,18 @@ async def procesar_cedula_sitio1(message: types.Message, state: FSMContext):
         )
         return
 
-    await state.update_data(cedula=cedula)
-    await message.answer(
-        f"📋 Cédula ingresada: *{cedula}*\n\n"
-        "¿Es correcta?\n\n"
-        "1️⃣ Sí, confirmar\n"
-        "2️⃣ No, editar\n\n"
-        "Escriba el número de la opción:",
-        parse_mode="Markdown"
-    )
-    await state.set_state(OperarioSitio1State.confirmar_cedula)
+    # Validar contra la tabla operarios_para_flujo
+    existe, nombre = await validar_operario_en_sistema(cedula)
 
-@dp.message(OperarioSitio1State.confirmar_cedula, F.text == "1")
-async def confirmar_cedula_sitio1_si(message: types.Message, state: FSMContext):
-    """Confirma la cédula y verifica múltiples cédulas"""
-    data = await state.get_data()
-    cedula = data.get('cedula')
+    if not existe:
+        await message.answer(
+            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
+            "Ingresa nuevamente:"
+        )
+        return
+
+    # Guardar cédula y nombre del operario
+    await state.update_data(cedula=cedula, nombre_operario=nombre)
     telegram_user_id = message.from_user.id
 
     # Verificar si hay múltiples cédulas (alerta de seguridad)
@@ -2533,8 +2557,9 @@ async def confirmar_cedula_sitio1_si(message: types.Message, state: FSMContext):
             tipo_operacion="Operario Sitio 1"
         )
 
+    # Saludo personalizado y continuar directamente al siguiente paso
     await message.answer(
-        f"✅ Cédula: *{cedula}*\n\n"
+        f"👋 *Hola {nombre}*\n\n"
         f"¿Cuántos *lechones* va a pesar?\n"
         f"_(Ingrese un número)_",
         reply_markup=ReplyKeyboardRemove(),
@@ -3076,7 +3101,7 @@ async def sitio3_traslado_corrales(message: types.Message, state: FSMContext):
 # PASO 1: Cédula
 @dp.message(RegistroState.sitio3_cedula)
 async def sitio3_get_cedula(message: types.Message, state: FSMContext):
-    """Captura y valida la cédula del operario"""
+    """Captura y valida la cédula del operario contra operarios_para_flujo"""
     cedula = message.text.strip()
 
     if not validar_cedula_sitio3(cedula):
@@ -3087,25 +3112,21 @@ async def sitio3_get_cedula(message: types.Message, state: FSMContext):
         )
         return
 
-    await state.update_data(sitio3_cedula=cedula)
-    await message.answer(
-        f"📋 Cédula ingresada: *{cedula}*\n\n"
-        "¿Es correcta?\n\n"
-        "1️⃣ Sí, confirmar\n"
-        "2️⃣ No, editar\n\n"
-        "Escriba el número de la opción:",
-        parse_mode="Markdown"
-    )
-    await state.set_state(RegistroState.sitio3_confirmar_cedula)
+    # Validar contra la tabla operarios_para_flujo
+    existe, nombre = await validar_operario_en_sistema(cedula)
 
-@dp.message(RegistroState.sitio3_confirmar_cedula, F.text == "1")
-async def sitio3_confirmar_cedula_si(message: types.Message, state: FSMContext):
-    """Confirma cédula y pasa a número de banda"""
-    # Verificar si hay múltiples cédulas (alerta de seguridad)
-    data = await state.get_data()
-    cedula = data.get('sitio3_cedula')
+    if not existe:
+        await message.answer(
+            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
+            "Ingresa nuevamente:"
+        )
+        return
+
+    # Guardar cédula y nombre del operario
+    await state.update_data(sitio3_cedula=cedula, nombre_operario=nombre)
     telegram_user_id = message.from_user.id
 
+    # Verificar si hay múltiples cédulas (alerta de seguridad)
     hay_alerta, cedulas_previas = await verificar_multiples_cedulas(telegram_user_id, cedula)
 
     if hay_alerta:
@@ -3125,23 +3146,14 @@ async def sitio3_confirmar_cedula_si(message: types.Message, state: FSMContext):
             tipo_operacion="Registro de consumo por lote"
         )
 
+    # Saludo personalizado y continuar directamente al siguiente paso
     await message.answer(
+        f"👋 *Hola {nombre}*\n\n"
         "🏷️ Escriba el número de banda\n\n"
         "_(ejemplo: 212-b1)_",
         parse_mode="Markdown"
     )
     await state.set_state(RegistroState.sitio3_numero_banda)
-
-@dp.message(RegistroState.sitio3_confirmar_cedula, F.text == "2")
-async def sitio3_confirmar_cedula_no(message: types.Message, state: FSMContext):
-    """Rechaza cédula y vuelve a preguntar"""
-    await message.answer("¿Cuál es su cédula?")
-    await state.set_state(RegistroState.sitio3_cedula)
-
-@dp.message(RegistroState.sitio3_confirmar_cedula)
-async def sitio3_confirmar_cedula_invalido(message: types.Message, state: FSMContext):
-    """Handler para respuestas inválidas en confirmación de cédula"""
-    await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
 
 # PASO 2: Número de Banda (sin confirmación intermedia)
 @dp.message(RegistroState.sitio3_numero_banda)
@@ -3448,7 +3460,7 @@ async def sitio3_agregar_mas_invalido(message: types.Message, state: FSMContext)
 # PASO 1: Cédula
 @dp.message(RegistroState.descarga_cedula)
 async def descarga_get_cedula(message: types.Message, state: FSMContext):
-    """Captura y valida la cédula del operario"""
+    """Captura y valida la cédula del operario contra operarios_para_flujo"""
     cedula = message.text.strip()
 
     if not validar_cedula_sitio3(cedula):
@@ -3459,29 +3471,24 @@ async def descarga_get_cedula(message: types.Message, state: FSMContext):
         )
         return
 
-    await state.update_data(descarga_cedula=cedula)
-    await message.answer(
-        f"📋 Cédula ingresada: *{cedula}*\n\n"
-        "¿Es correcta?\n\n"
-        "1️⃣ Sí, confirmar\n"
-        "2️⃣ No, editar\n\n"
-        "Escriba el número de la opción:",
-        parse_mode="Markdown"
-    )
-    await state.set_state(RegistroState.descarga_confirmar_cedula)
+    # Validar contra la tabla operarios_para_flujo
+    existe, nombre = await validar_operario_en_sistema(cedula)
 
-@dp.message(RegistroState.descarga_confirmar_cedula, F.text == "1")
-async def descarga_confirmar_cedula_si(message: types.Message, state: FSMContext):
-    """Confirma cédula y pasa a cantidad de lechones"""
-    # Verificar si hay múltiples cédulas (alerta de seguridad)
-    data = await state.get_data()
-    cedula = data.get('descarga_cedula')
+    if not existe:
+        await message.answer(
+            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
+            "Ingresa nuevamente:"
+        )
+        return
+
+    # Guardar cédula y nombre del operario
+    await state.update_data(descarga_cedula=cedula, nombre_operario=nombre)
     telegram_user_id = message.from_user.id
 
+    # Verificar si hay múltiples cédulas (alerta de seguridad)
     hay_alerta, cedulas_previas = await verificar_multiples_cedulas(telegram_user_id, cedula)
 
     if hay_alerta:
-        # Obtener nombre de usuario para la alerta
         username = message.from_user.username
         if username:
             username = f"@{username}"
@@ -3490,7 +3497,6 @@ async def descarga_confirmar_cedula_si(message: types.Message, state: FSMContext
             last_name = message.from_user.last_name or ""
             username = f"{first_name} {last_name}".strip() or "Sin nombre"
 
-        # Enviar alerta al grupo
         await enviar_alerta_seguridad(
             telegram_user_id=telegram_user_id,
             username=username,
@@ -3499,24 +3505,16 @@ async def descarga_confirmar_cedula_si(message: types.Message, state: FSMContext
             tipo_operacion="Descarga de Animales"
         )
 
+    # Saludo personalizado y continuar directamente al siguiente paso
     await message.answer(
+        f"👋 *Hola {nombre}*\n\n"
         "🐷 Ingrese la cantidad de lechones\n\n"
         "⚠️ Nota: Los lechones son cerdos jóvenes que\n"
         "están llegando a la granja.\n\n"
-        "Cantidad:"
+        "Cantidad:",
+        parse_mode="Markdown"
     )
     await state.set_state(RegistroState.descarga_cantidad_lechones)
-
-@dp.message(RegistroState.descarga_confirmar_cedula, F.text == "2")
-async def descarga_confirmar_cedula_no(message: types.Message, state: FSMContext):
-    """Rechaza cédula y vuelve a preguntar"""
-    await message.answer("¿Cuál es su cédula?")
-    await state.set_state(RegistroState.descarga_cedula)
-
-@dp.message(RegistroState.descarga_confirmar_cedula)
-async def descarga_confirmar_cedula_invalido(message: types.Message, state: FSMContext):
-    """Handler para respuestas inválidas en confirmación de cédula"""
-    await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
 
 # PASO 2: Cantidad de Lechones
 @dp.message(RegistroState.descarga_cantidad_lechones)
@@ -3831,7 +3829,7 @@ def validar_silo_unico(valor: str) -> tuple[bool, int, str]:
 # PASO 1: Cédula
 @dp.message(RegistroState.medicion_cedula)
 async def medicion_get_cedula(message: types.Message, state: FSMContext):
-    """Captura y valida la cédula del operario"""
+    """Captura y valida la cédula del operario contra operarios_para_flujo"""
     cedula = message.text.strip()
 
     if not validar_cedula_sitio3(cedula):
@@ -3842,24 +3840,21 @@ async def medicion_get_cedula(message: types.Message, state: FSMContext):
         )
         return
 
-    await state.update_data(medicion_cedula=cedula)
-    await message.answer(
-        f"📋 Cédula ingresada: *{cedula}*\n\n"
-        "¿Es correcta?\n\n"
-        "1️⃣ Sí, confirmar\n"
-        "2️⃣ No, editar\n\n"
-        "Escriba el número de la opción:",
-        parse_mode="Markdown"
-    )
-    await state.set_state(RegistroState.medicion_confirmar_cedula)
+    # Validar contra la tabla operarios_para_flujo
+    existe, nombre = await validar_operario_en_sistema(cedula)
 
-@dp.message(RegistroState.medicion_confirmar_cedula, F.text == "1")
-async def medicion_confirmar_cedula_si(message: types.Message, state: FSMContext):
-    """Confirma cédula y pasa a selección de silo"""
-    data = await state.get_data()
-    cedula = data.get('medicion_cedula')
+    if not existe:
+        await message.answer(
+            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
+            "Ingresa nuevamente:"
+        )
+        return
+
+    # Guardar cédula y nombre del operario
+    await state.update_data(medicion_cedula=cedula, nombre_operario=nombre)
     telegram_user_id = message.from_user.id
 
+    # Verificar si hay múltiples cédulas (alerta de seguridad)
     hay_alerta, cedulas_previas = await verificar_multiples_cedulas(telegram_user_id, cedula)
 
     if hay_alerta:
@@ -3889,7 +3884,9 @@ async def medicion_confirmar_cedula_si(message: types.Message, state: FSMContext
     builder.button(text="6")
     builder.adjust(3)  # 3 botones por fila
 
+    # Saludo personalizado y continuar directamente al siguiente paso
     await message.answer(
+        f"👋 *Hola {nombre}*\n\n"
         "📦 *Selección de Silo*\n\n"
         "La granja tiene 6 silos disponibles.\n"
         "Seleccione UN silo para registrar el ingreso:\n\n"
@@ -3898,16 +3895,6 @@ async def medicion_confirmar_cedula_si(message: types.Message, state: FSMContext
         reply_markup=builder.as_markup(resize_keyboard=True)
     )
     await state.set_state(RegistroState.medicion_seleccion_silos)
-
-@dp.message(RegistroState.medicion_confirmar_cedula, F.text == "2")
-async def medicion_confirmar_cedula_no(message: types.Message, state: FSMContext):
-    """Rechaza cédula y vuelve a preguntar"""
-    await message.answer("¿Cuál es su cédula?")
-    await state.set_state(RegistroState.medicion_cedula)
-
-@dp.message(RegistroState.medicion_confirmar_cedula)
-async def medicion_confirmar_cedula_invalido(message: types.Message, state: FSMContext):
-    await message.answer("⚠️ Por favor escriba 1 para confirmar o 2 para editar.")
 
 # PASO 2: Selección de UN solo silo
 @dp.message(RegistroState.medicion_seleccion_silos, F.text.in_(["1", "2", "3", "4", "5", "6"]))
@@ -4286,48 +4273,41 @@ async def medicion_agregar_mas_invalido(message: types.Message, state: FSMContex
 
 @dp.message(RegistroState.celdas_cedula)
 async def celdas_get_cedula(message: types.Message, state: FSMContext):
-    """Obtener cédula del operario para registro de celdas de carga"""
-    if not validar_cedula(message.text):
+    """Obtener cédula del operario para registro de celdas de carga - valida contra operarios_para_flujo"""
+    cedula = message.text.strip()
+
+    if not validar_cedula(cedula):
         await message.answer("⚠️ Ingrese solo números (sin letras ni símbolos).")
         return
 
-    await state.update_data(celdas_cedula=message.text)
+    # Validar contra la tabla operarios_para_flujo
+    existe, nombre = await validar_operario_en_sistema(cedula)
 
-    await message.answer(
-        f"📋 Cédula ingresada: *{message.text}*\n\n"
-        "¿Es correcta?\n\n"
-        "1️⃣ Sí, confirmar\n"
-        "2️⃣ No, editar\n\n"
-        "Escriba el número de la opción:",
-        parse_mode="Markdown"
-    )
-    await state.set_state(RegistroState.celdas_confirmar_cedula)
+    if not existe:
+        await message.answer(
+            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
+            "Ingresa nuevamente:"
+        )
+        return
 
-@dp.message(RegistroState.celdas_confirmar_cedula, F.text == "1")
-async def celdas_confirmar_cedula_si(message: types.Message, state: FSMContext):
-    """Confirmar cédula y pasar a selección de silo"""
+    # Guardar cédula y nombre del operario
+    await state.update_data(celdas_cedula=cedula, nombre_operario=nombre)
+
+    # Crear teclado con opciones de silos
     builder = ReplyKeyboardBuilder()
     for i in range(1, 7):
         builder.add(types.KeyboardButton(text=str(i)))
     builder.adjust(3)
 
+    # Saludo personalizado y continuar directamente al siguiente paso
     await message.answer(
+        f"👋 *Hola {nombre}*\n\n"
         "🏭 *Selección de Silo*\n\n"
         "Seleccione el número de silo (1-6):",
         parse_mode="Markdown",
         reply_markup=builder.as_markup(resize_keyboard=True)
     )
     await state.set_state(RegistroState.celdas_seleccion_silo)
-
-@dp.message(RegistroState.celdas_confirmar_cedula, F.text == "2")
-async def celdas_confirmar_cedula_no(message: types.Message, state: FSMContext):
-    """Editar cédula"""
-    await message.answer("📋 Ingrese nuevamente su número de cédula:")
-    await state.set_state(RegistroState.celdas_cedula)
-
-@dp.message(RegistroState.celdas_confirmar_cedula)
-async def celdas_confirmar_cedula_invalido(message: types.Message, state: FSMContext):
-    await message.answer("⚠️ Por favor seleccione 1 o 2.")
 
 @dp.message(RegistroState.celdas_seleccion_silo)
 async def celdas_seleccionar_silo(message: types.Message, state: FSMContext):
@@ -4576,48 +4556,41 @@ async def celdas_agregar_mas_invalido(message: types.Message, state: FSMContext)
 
 @dp.message(RegistroState.combustible_cedula)
 async def combustible_get_cedula(message: types.Message, state: FSMContext):
-    """Obtener cédula del operario para registro de combustible"""
-    if not validar_cedula(message.text):
+    """Obtener cédula del operario para registro de combustible - valida contra operarios_para_flujo"""
+    cedula = message.text.strip()
+
+    if not validar_cedula(cedula):
         await message.answer("⚠️ Ingrese solo números (sin letras ni símbolos).")
         return
 
-    await state.update_data(combustible_cedula=message.text)
+    # Validar contra la tabla operarios_para_flujo
+    existe, nombre = await validar_operario_en_sistema(cedula)
 
-    await message.answer(
-        f"📋 Cédula ingresada: *{message.text}*\n\n"
-        "¿Es correcta?\n\n"
-        "1️⃣ Sí, confirmar\n"
-        "2️⃣ No, editar\n\n"
-        "Escriba el número de la opción:",
-        parse_mode="Markdown"
-    )
-    await state.set_state(RegistroState.combustible_confirmar_cedula)
+    if not existe:
+        await message.answer(
+            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
+            "Ingresa nuevamente:"
+        )
+        return
 
-@dp.message(RegistroState.combustible_confirmar_cedula, F.text == "1")
-async def combustible_confirmar_cedula_si(message: types.Message, state: FSMContext):
-    """Confirmar cédula y preguntar tipo de combustible"""
+    # Guardar cédula y nombre del operario
+    await state.update_data(combustible_cedula=cedula, nombre_operario=nombre)
+
+    # Crear teclado con opciones de tipo de combustible
     builder = ReplyKeyboardBuilder()
     builder.add(types.KeyboardButton(text="⛽ Diesel"))
     builder.add(types.KeyboardButton(text="⛽ Gasolina"))
     builder.adjust(2)
 
+    # Saludo personalizado y continuar directamente al siguiente paso
     await message.answer(
+        f"👋 *Hola {nombre}*\n\n"
         "⛽ *Tipo de Combustible*\n\n"
         "Seleccione el tipo de combustible:",
         parse_mode="Markdown",
         reply_markup=builder.as_markup(resize_keyboard=True)
     )
     await state.set_state(RegistroState.combustible_tipo)
-
-@dp.message(RegistroState.combustible_confirmar_cedula, F.text == "2")
-async def combustible_confirmar_cedula_no(message: types.Message, state: FSMContext):
-    """Editar cédula"""
-    await message.answer("📋 Ingrese nuevamente su número de cédula:")
-    await state.set_state(RegistroState.combustible_cedula)
-
-@dp.message(RegistroState.combustible_confirmar_cedula)
-async def combustible_confirmar_cedula_invalido(message: types.Message, state: FSMContext):
-    await message.answer("⚠️ Por favor seleccione 1 o 2.")
 
 @dp.message(RegistroState.combustible_tipo)
 async def combustible_seleccionar_tipo(message: types.Message, state: FSMContext):
@@ -5169,43 +5142,35 @@ def validar_cantidad_animales_traslado(valor: str) -> tuple[bool, int, str]:
 
 @dp.message(RegistroState.traslado_cedula)
 async def traslado_get_cedula(message: types.Message, state: FSMContext):
-    """Obtener cédula del operario para traslado entre corrales"""
-    if not validar_cedula(message.text):
+    """Obtener cédula del operario para traslado entre corrales - valida contra operarios_para_flujo"""
+    cedula = message.text.strip()
+
+    if not validar_cedula(cedula):
         await message.answer("⚠️ Ingrese solo números (sin letras ni símbolos).")
         return
 
-    await state.update_data(traslado_cedula=message.text)
+    # Validar contra la tabla operarios_para_flujo
+    existe, nombre = await validar_operario_en_sistema(cedula)
 
-    await message.answer(
-        f"📋 Cédula ingresada: *{message.text}*\n\n"
-        "¿Es correcta?\n\n"
-        "1️⃣ Sí, confirmar\n"
-        "2️⃣ No, editar\n\n"
-        "Escriba el número de la opción:",
-        parse_mode="Markdown"
-    )
-    await state.set_state(RegistroState.traslado_confirmar_cedula)
+    if not existe:
+        await message.answer(
+            "❌ Cédula incorrecta, no estás en el sistema.\n\n"
+            "Ingresa nuevamente:"
+        )
+        return
 
-@dp.message(RegistroState.traslado_confirmar_cedula, F.text == "1")
-async def traslado_confirmar_cedula_si(message: types.Message, state: FSMContext):
-    """Confirmar cédula y pedir corral de origen"""
+    # Guardar cédula y nombre del operario
+    await state.update_data(traslado_cedula=cedula, nombre_operario=nombre)
+
+    # Saludo personalizado y continuar directamente al siguiente paso
     await message.answer(
+        f"👋 *Hola {nombre}*\n\n"
         "🐷 *Corral de Origen*\n\n"
         "¿De qué corral salen los animales?\n\n"
         "Ingrese un número del 1 al 59:",
         parse_mode="Markdown"
     )
     await state.set_state(RegistroState.traslado_corral_origen)
-
-@dp.message(RegistroState.traslado_confirmar_cedula, F.text == "2")
-async def traslado_confirmar_cedula_no(message: types.Message, state: FSMContext):
-    """Editar cédula"""
-    await message.answer("📋 Ingrese nuevamente su número de cédula:")
-    await state.set_state(RegistroState.traslado_cedula)
-
-@dp.message(RegistroState.traslado_confirmar_cedula)
-async def traslado_confirmar_cedula_invalido(message: types.Message, state: FSMContext):
-    await message.answer("⚠️ Por favor seleccione 1 o 2.")
 
 @dp.message(RegistroState.traslado_corral_origen)
 async def traslado_get_corral_origen(message: types.Message, state: FSMContext):
