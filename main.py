@@ -348,23 +348,12 @@ class ConductoresState(StatesGroup):
 
 # ==================== ESTADOS PARA OPERARIO SITIO 1 ==================== #
 class OperarioSitio1State(StatesGroup):
-    """Estados para el menú de Operario Sitio 1 (Granja)"""
+    """Estados para el menú de Operario Sitio 1 (Granja) - Flujo simplificado"""
     cedula = State()
-    confirmar_cedula = State()
-
-    cantidad_lechones = State()  # Cuantos lechones va a pesar
-    confirmar_cantidad_lechones = State()
-
-    cantidad_pesajes = State()
-    confirmar_cantidad_pesajes = State()
-
-    lechones_por_pesaje = State()
-    confirmar_lechones_por_pesaje = State()
-
-    # Estados para el loop de pesaje
-    peso_pesaje = State()  # Peso del pesaje actual
-    confirmar_peso = State()  # Confirmar peso del pesaje
-    foto_final = State()  # Única foto de confirmación al final
+    cantidad_lechones = State()  # ¿Cuántos lechones salen?
+    peso_total = State()  # ¿Cuánto es el peso total?
+    edad_promedio = State()  # ¿Cuál es la edad promedio?
+    foto_remision = State()  # Manda foto de la remisión
 
 # ==================== VALIDACIONES ==================== #
 def validar_cedula(valor):
@@ -2535,7 +2524,7 @@ async def enviar_notificacion_grupo_conductor(data: dict):
     except Exception as e:
         print(f"⚠️ Error enviando notificación al grupo: {e}")
 
-# ==================== OPERARIO SITIO 1 - REGISTRO DE LECHONES ==================== #
+# ==================== OPERARIO SITIO 1 - REGISTRO DE LECHONES (SIMPLIFICADO) ==================== #
 
 @dp.message(OperarioSitio1State.cedula)
 async def procesar_cedula_sitio1(message: types.Message, state: FSMContext):
@@ -2555,444 +2544,164 @@ async def procesar_cedula_sitio1(message: types.Message, state: FSMContext):
 
     if not existe:
         if error_flujo:
-            # Cédula existe pero no tiene acceso a este flujo
-            await message.answer(
-                f"❌ {error_flujo}\n\n"
-                "Ingresa otra cédula:"
-            )
+            await message.answer(f"❌ {error_flujo}\n\nIngresa otra cédula:")
         else:
-            # Cédula no existe en el sistema
-            await message.answer(
-                "❌ Cédula incorrecta, no estás en el sistema.\n\n"
-                "Ingresa nuevamente:"
-            )
+            await message.answer("❌ Cédula incorrecta, no estás en el sistema.\n\nIngresa nuevamente:")
         return
 
     # Guardar cédula y nombre del operario
-    await state.update_data(cedula=cedula, nombre_operario=nombre)
-    telegram_user_id = message.from_user.id
+    await state.update_data(cedula=cedula, nombre_operario=nombre, telegram_user_id=message.from_user.id)
 
-    # Verificar si hay múltiples cédulas (alerta de seguridad)
-    hay_alerta, cedulas_previas = await verificar_multiples_cedulas(telegram_user_id, cedula)
-
-    if hay_alerta:
-        username = message.from_user.username or message.from_user.full_name or "Desconocido"
-        await enviar_alerta_seguridad(
-            telegram_user_id=telegram_user_id,
-            username=username,
-            cedula_actual=cedula,
-            cedulas_previas=cedulas_previas,
-            tipo_operacion="Operario Sitio 1"
-        )
-
-    # Saludo personalizado y continuar directamente al siguiente paso
+    # Saludo personalizado y preguntar cantidad de lechones
     await message.answer(
         f"👋 *Hola {nombre}*\n\n"
-        f"¿Cuántos *lechones* va a pesar?\n"
-        f"_(Ingrese un número)_",
+        "🐷 ¿Cuántos lechones salen?",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
     await state.set_state(OperarioSitio1State.cantidad_lechones)
 
 @dp.message(OperarioSitio1State.cantidad_lechones)
-async def procesar_cantidad_lechones(message: types.Message, state: FSMContext):
-    """Procesa la cantidad de lechones a pesar"""
-    es_valido, cantidad, error = validar_numero_entero(message.text.strip(), minimo=1, maximo=10000)
-    
+async def procesar_cantidad_lechones_sitio1(message: types.Message, state: FSMContext):
+    """Procesa la cantidad de lechones"""
+    es_valido, cantidad, error = validar_numero_entero(message.text.strip(), minimo=1, maximo=50000)
+
     if not es_valido:
-        await message.answer(f"⚠️ {error}\n\nIntente nuevamente:")
+        await message.answer(f"⚠️ {error}\n\nIngrese un número válido:")
         return
-    
+
     await state.update_data(cantidad_lechones=cantidad)
-    
-    keyboard = ReplyKeyboardBuilder()
-    keyboard.button(text="1. Sí, confirmar")
-    keyboard.button(text="2. No, editar")
-    keyboard.adjust(2)
-    
+
     await message.answer(
-        f"Cantidad de lechones: *{cantidad}*\n\n"
-        f"¿Es correcta?\n\n"
-        f"1️⃣ Sí, confirmar\n"
-        f"2️⃣ No, editar\n\n"
-        f"Escriba el número de la opción:",
-        reply_markup=keyboard.as_markup(resize_keyboard=True),
+        f"✅ Cantidad: *{cantidad} lechones*\n\n"
+        "⚖️ ¿Cuánto es el peso total de todos los lechones? (en kg)",
         parse_mode="Markdown"
     )
-    await state.set_state(OperarioSitio1State.confirmar_cantidad_lechones)
+    await state.set_state(OperarioSitio1State.peso_total)
 
-@dp.message(OperarioSitio1State.confirmar_cantidad_lechones)
-async def confirmar_cantidad_lechones(message: types.Message, state: FSMContext):
-    """Confirma la cantidad de lechones o permite modificarla"""
-    texto = message.text.strip().lower()
-    
-    if "2" in texto or "editar" in texto or "no" in texto:
-        await message.answer(
-            "¿Cuántos *lechones* va a pesar?\n"
-            "_(Ingrese un número)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(OperarioSitio1State.cantidad_lechones)
-        return
-    
-    if "1" in texto or "confirmar" in texto or "sí" in texto or "si" in texto:
-        data = await state.get_data()
-        cantidad_lechones = data.get('cantidad_lechones')
-        
-        await message.answer(
-            f"✅ Cantidad de lechones: *{cantidad_lechones}*\n\n"
-            f"¿Cuántos *pesajes* va a registrar?\n"
-            f"_(Ejemplo: 30 pesajes)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(OperarioSitio1State.cantidad_pesajes)
-        return
-    
-    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Editar:")
-
-@dp.message(OperarioSitio1State.confirmar_cedula, F.text == "2")
-async def confirmar_cedula_sitio1_no(message: types.Message, state: FSMContext):
-    """Permite editar la cédula"""
-    await message.answer(
-        "Por favor, ingrese nuevamente su *cédula*:",
-        reply_markup=ReplyKeyboardRemove(),
-        parse_mode="Markdown"
-    )
-    await state.set_state(OperarioSitio1State.cedula)
-
-@dp.message(OperarioSitio1State.confirmar_cedula)
-async def confirmar_cedula_sitio1(message: types.Message, state: FSMContext):
-    """Confirma la cédula o permite modificarla"""
-    texto = message.text.strip().lower()
-
-    if "2" in texto or "modificar" in texto:
-        await message.answer(
-            "Por favor, ingrese nuevamente su *cédula*:",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(OperarioSitio1State.cedula)
-        return
-
-    if "1" in texto or "confirmar" in texto:
-        data = await state.get_data()
-        cedula = data.get("cedula_temp")
-        await state.update_data(cedula=cedula)
-
-        await message.answer(
-            f"✅ Cédula: *{cedula}*\n\n"
-            f"¿Cuántos *pesajes* va a registrar?\n"
-            f"_(Ejemplo: 30 pesajes)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(OperarioSitio1State.cantidad_pesajes)
-        return
-
-    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
-
-@dp.message(OperarioSitio1State.cantidad_pesajes)
-async def procesar_cantidad_pesajes(message: types.Message, state: FSMContext):
-    """Procesa la cantidad de pesajes"""
-    es_valido, cantidad, error = validar_numero_entero(message.text.strip(), minimo=1, maximo=1000)
-    
-    if not es_valido:
-        await message.answer(f"⚠️ {error}\n\nIntente nuevamente:")
-        return
-    
-    await state.update_data(cantidad_pesajes_temp=cantidad)
-    await preguntar_confirmacion(message, str(cantidad), "cantidad de pesajes")
-    await state.set_state(OperarioSitio1State.confirmar_cantidad_pesajes)
-
-@dp.message(OperarioSitio1State.confirmar_cantidad_pesajes)
-async def confirmar_cantidad_pesajes(message: types.Message, state: FSMContext):
-    """Confirma la cantidad de pesajes o permite modificarla"""
-    texto = message.text.strip().lower()
-    
-    if "2" in texto or "modificar" in texto:
-        await message.answer(
-            "¿Cuántos *pesajes* va a registrar?\n"
-            f"_(Ejemplo: 30 pesajes)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(OperarioSitio1State.cantidad_pesajes)
-        return
-    
-    if "1" in texto or "confirmar" in texto:
-        data = await state.get_data()
-        cantidad = data.get("cantidad_pesajes_temp")
-        await state.update_data(cantidad_pesajes=cantidad)
-        
-        await message.answer(
-            f"✅ Cantidad de pesajes: *{cantidad}*\n\n"
-            f"¿Cuántos *lechones* hay por cada pesaje?\n"
-            f"_(Ejemplo: 10 lechones por pesaje)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(OperarioSitio1State.lechones_por_pesaje)
-        return
-    
-    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
-
-@dp.message(OperarioSitio1State.lechones_por_pesaje)
-async def procesar_lechones_por_pesaje(message: types.Message, state: FSMContext):
-    """Procesa la cantidad de lechones por pesaje"""
-    es_valido, cantidad, error = validar_numero_entero(message.text.strip(), minimo=1, maximo=100)
-    
-    if not es_valido:
-        await message.answer(f"⚠️ {error}\n\nIntente nuevamente:")
-        return
-    
-    await state.update_data(lechones_por_pesaje_temp=cantidad)
-    await preguntar_confirmacion(message, str(cantidad), "lechones por pesaje")
-    await state.set_state(OperarioSitio1State.confirmar_lechones_por_pesaje)
-
-@dp.message(OperarioSitio1State.confirmar_lechones_por_pesaje)
-async def confirmar_lechones_por_pesaje(message: types.Message, state: FSMContext):
-    """Confirma la cantidad de lechones por pesaje"""
-    texto = message.text.strip().lower()
-    
-    if "2" in texto or "modificar" in texto:
-        await message.answer(
-            "¿Cuántos *lechones* hay por cada pesaje?",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(OperarioSitio1State.lechones_por_pesaje)
-        return
-    
-    if "1" in texto or "confirmar" in texto:
-        data = await state.get_data()
-        lechones = data.get("lechones_por_pesaje_temp")
-        await state.update_data(
-            lechones_por_pesaje=lechones,
-            pesaje_actual=1,
-            pesos=[],
-            fotos=[]
-        )
-        
-        await message.answer(
-            f"✅ Lechones por pesaje: *{lechones}*\n\n"
-            f"📊 Ingrese el *peso del pesaje #1* en kilogramos:\n"
-            f"_(Este pesaje contiene {lechones} lechones)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(OperarioSitio1State.peso_pesaje)
-        return
-    
-    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
-
-@dp.message(OperarioSitio1State.peso_pesaje)
-async def procesar_peso_pesaje(message: types.Message, state: FSMContext):
-    """Procesa el peso de un pesaje"""
-    es_valido, peso, error = validar_galones(message.text.strip())  # Reutilizamos validador de decimales
+@dp.message(OperarioSitio1State.peso_total)
+async def procesar_peso_total_sitio1(message: types.Message, state: FSMContext):
+    """Procesa el peso total de los lechones"""
+    es_valido, peso, error = validar_galones(message.text.strip())
 
     if not es_valido or peso <= 0:
-        await message.answer(
-            f"⚠️ Peso inválido. Ingrese un número válido mayor a 0 kg\n\n"
-            f"Intente nuevamente:"
-        )
+        await message.answer("⚠️ Peso inválido. Ingrese un número válido mayor a 0:")
         return
 
-    data = await state.get_data()
-    pesaje_actual = data.get("pesaje_actual")
-    lechones_por_pesaje = data.get("lechones_por_pesaje")
+    await state.update_data(peso_total=peso)
 
-    await state.update_data(peso_temp=peso)
-    await preguntar_confirmacion(message, f"{peso:,.2f} kg", f"peso del pesaje #{pesaje_actual} ({lechones_por_pesaje} lechones)")
-    await state.set_state(OperarioSitio1State.confirmar_peso)
+    await message.answer(
+        f"✅ Peso total: *{peso:,.2f} kg*\n\n"
+        "📅 ¿Cuál es la edad promedio de los lechones? (en días)",
+        parse_mode="Markdown"
+    )
+    await state.set_state(OperarioSitio1State.edad_promedio)
 
-@dp.message(OperarioSitio1State.confirmar_peso)
-async def confirmar_peso_pesaje(message: types.Message, state: FSMContext):
-    """Confirma el peso del pesaje o permite modificarlo"""
-    texto = message.text.strip().lower()
+@dp.message(OperarioSitio1State.edad_promedio)
+async def procesar_edad_promedio_sitio1(message: types.Message, state: FSMContext):
+    """Procesa la edad promedio de los lechones"""
+    es_valido, edad, error = validar_numero_entero(message.text.strip(), minimo=1, maximo=365)
 
-    if "2" in texto or "modificar" in texto:
-        data = await state.get_data()
-        pesaje_actual = data.get("pesaje_actual")
-        lechones_por_pesaje = data.get("lechones_por_pesaje")
-        await message.answer(
-            f"📊 Ingrese nuevamente el *peso del pesaje #{pesaje_actual}* en kilogramos:\n"
-            f"_(Este pesaje contiene {lechones_por_pesaje} lechones)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(OperarioSitio1State.peso_pesaje)
+    if not es_valido:
+        await message.answer(f"⚠️ {error}\n\nIngrese un número válido (días):")
         return
 
-    if "1" in texto or "confirmar" in texto:
-        data = await state.get_data()
-        peso = data.get("peso_temp")
-        pesaje_actual = data.get("pesaje_actual")
-        cantidad_pesajes = data.get("cantidad_pesajes")
-        lechones_por_pesaje = data.get("lechones_por_pesaje")
-        pesos = data.get("pesos", [])
-        
-        # Guardar peso en la lista
-        pesos.append(peso)
-        await state.update_data(pesos=pesos)
-        
-        # Verificar si hay más pesajes
-        if pesaje_actual < cantidad_pesajes:
-            siguiente = pesaje_actual + 1
-            await state.update_data(pesaje_actual=siguiente)
-            
-            await message.answer(
-                f"✅ Pesaje #{pesaje_actual} registrado: *{peso:,.2f} kg*\n\n"
-                f"📊 Ingrese el *peso del pesaje #{siguiente}* en kilogramos:\n"
-                f"_(Progreso: {pesaje_actual}/{cantidad_pesajes} | {lechones_por_pesaje} lechones por pesaje)_",
-                reply_markup=ReplyKeyboardRemove(),
-                parse_mode="Markdown"
-            )
-            await state.set_state(OperarioSitio1State.peso_pesaje)
-        else:
-            # Todos los pesajes completados, pedir foto final
-            await message.answer(
-                f"✅ Pesaje #{pesaje_actual} registrado: *{peso:,.2f} kg*\n\n"
-                f"🎉 *¡Todos los {cantidad_pesajes} pesajes han sido registrados!*\n\n"
-                f"📸 Ahora envíe una *foto de confirmación* del proceso:",
-                reply_markup=ReplyKeyboardRemove(),
-                parse_mode="Markdown"
-            )
-            await state.set_state(OperarioSitio1State.foto_final)
-        return
-    
-    await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
+    await state.update_data(edad_promedio=edad)
 
-@dp.message(OperarioSitio1State.foto_final, F.photo)
-async def procesar_foto_final(message: types.Message, state: FSMContext):
-    """Procesa la foto final de confirmación y finaliza el registro"""
-    data = await state.get_data()
-    
+    await message.answer(
+        f"✅ Edad promedio: *{edad} días*\n\n"
+        "📸 Manda foto de la Remisión:",
+        parse_mode="Markdown"
+    )
+    await state.set_state(OperarioSitio1State.foto_remision)
+
+@dp.message(OperarioSitio1State.foto_remision, F.photo)
+async def procesar_foto_remision_sitio1(message: types.Message, state: FSMContext):
+    """Procesa la foto de remisión y finaliza el registro"""
     # Descargar foto
     photo = message.photo[-1]
     file = await bot.get_file(photo.file_id)
-    file_path = f"temp_foto_final_{message.from_user.id}.jpg"
+    file_path = f"temp_foto_remision_{message.from_user.id}.jpg"
     await bot.download_file(file.file_path, file_path)
 
     # Subir a Google Drive
-    foto_url = upload_to_drive(file_path, f"foto_confirmacion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg")
-    
+    foto_url = upload_to_drive(file_path, f"remision_sitio1_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg")
+
     # Eliminar archivo temporal
     if os.path.exists(file_path):
         os.remove(file_path)
-    
+
     # Guardar URL de foto
-    await state.update_data(foto_confirmacion=foto_url if foto_url else "Sin foto")
-    
+    await state.update_data(foto_remision=foto_url if foto_url else "Sin foto")
+
     # Finalizar registro
     await finalizar_registro_sitio1(message, state)
 
-@dp.message(OperarioSitio1State.foto_final)
-async def foto_final_invalida(message: types.Message, state: FSMContext):
+@dp.message(OperarioSitio1State.foto_remision)
+async def foto_remision_invalida_sitio1(message: types.Message, state: FSMContext):
     """Handler para cuando no se envía una foto"""
     await message.answer(
-        f"⚠️ Por favor envíe una *foto* de confirmación del proceso.\n\n"
-        f"_(No se aceptan archivos de texto)_",
+        "⚠️ Por favor envía una *foto* de la Remisión.",
         parse_mode="Markdown"
     )
 
 async def finalizar_registro_sitio1(message: types.Message, state: FSMContext):
-    """Finaliza el registro y envía resumen"""
+    """Finaliza el registro simplificado y envía resumen"""
     data = await state.get_data()
 
     cedula = data.get("cedula")
-    telegram_id = data.get("telegram_id")
-    cantidad_pesajes = data.get("cantidad_pesajes")
-    lechones_por_pesaje = data.get("lechones_por_pesaje")
-    pesos = data.get("pesos", [])
-    foto_confirmacion = data.get("foto_confirmacion", "Sin foto")
-    
-    # Calcular estadísticas
-    peso_total = sum(pesos)
-    total_lechones = cantidad_pesajes * lechones_por_pesaje
-    peso_promedio_por_lechon = peso_total / total_lechones if total_lechones > 0 else 0
-    peso_promedio_por_pesaje = peso_total / len(pesos) if pesos else 0
-    
+    nombre_operario = data.get("nombre_operario", "")
+    cantidad_lechones = data.get("cantidad_lechones")
+    peso_total = data.get("peso_total")
+    edad_promedio = data.get("edad_promedio")
+    foto_remision = data.get("foto_remision", "Sin foto")
+
+    # Calcular peso promedio por lechón
+    peso_promedio = peso_total / cantidad_lechones if cantidad_lechones > 0 else 0
+
     # Guardar en base de datos
-    await guardar_registro_sitio1(data, peso_total, peso_promedio_por_lechon, peso_promedio_por_pesaje, total_lechones)
-    
+    await guardar_registro_sitio1(data, peso_promedio)
+
     # Enviar notificación al grupo
-    await enviar_notificacion_grupo_sitio1(data, peso_total, peso_promedio_por_lechon, peso_promedio_por_pesaje, total_lechones)
-    
+    await enviar_notificacion_grupo_sitio1(data, peso_promedio)
+
     # Crear resumen para el usuario
     resumen = f"✅ *REGISTRO COMPLETADO*\n\n"
-    resumen += f"👤 Cédula: *{cedula}*\n"
-    resumen += f"📊 Pesajes registrados: *{cantidad_pesajes}*\n"
-    resumen += f"🐷 Lechones por pesaje: *{lechones_por_pesaje}*\n"
-    resumen += f"🐷 Total de lechones: *{total_lechones}*\n"
+    resumen += f"👤 Operario: *{nombre_operario}*\n"
+    resumen += f"🆔 Cédula: *{cedula}*\n"
+    resumen += f"🐷 Cantidad de lechones: *{cantidad_lechones}*\n"
     resumen += f"⚖️ Peso total: *{peso_total:,.2f} kg*\n"
-    resumen += f"📈 Peso promedio por lechón: *{peso_promedio_por_lechon:,.2f} kg*\n"
-    resumen += f"📈 Peso promedio por pesaje: *{peso_promedio_por_pesaje:,.2f} kg*\n\n"
-    resumen += f"*DETALLE POR PESAJE:*\n\n"
-    
-    for i, peso in enumerate(pesos, 1):
-        peso_por_lechon = peso / lechones_por_pesaje
-        resumen += f"Pesaje #{i}: {peso:,.2f} kg ({peso_por_lechon:,.2f} kg/lechón)\n"
-    
+    resumen += f"📊 Peso promedio por lechón: *{peso_promedio:,.2f} kg*\n"
+    resumen += f"📅 Edad promedio: *{edad_promedio} días*\n"
+
     await message.answer(resumen, parse_mode="Markdown")
     await finalizar_flujo(message, state)
 
-async def guardar_registro_sitio1(data: dict, peso_total: float, peso_promedio_lechon: float, peso_promedio_pesaje: float, total_lechones: int):
-    """Guarda el registro en la base de datos"""
+async def guardar_registro_sitio1(data: dict, peso_promedio: float):
+    """Guarda el registro simplificado en la base de datos"""
     conn = None
     try:
         conn = await get_db_connection()
         if not conn:
             print("⚠️ No se pudo conectar a la base de datos")
             return
-        
-        # Crear tabla si no existe
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS operario_fijo_granja (
-                id SERIAL PRIMARY KEY,
-                telegram_id BIGINT NOT NULL,
-                cedula VARCHAR(20) NOT NULL,
-                cantidad_pesajes INTEGER NOT NULL,
-                lechones_por_pesaje INTEGER NOT NULL,
-                total_lechones INTEGER NOT NULL,
-                peso_total DECIMAL(10, 2) NOT NULL,
-                peso_promedio_por_lechon DECIMAL(10, 2) NOT NULL,
-                peso_promedio_por_pesaje DECIMAL(10, 2) NOT NULL,
-                pesos_detalle TEXT,
-                foto_confirmacion TEXT,
-                fecha TIMESTAMP DEFAULT NOW()
-            )
-        ''')
-        
-        pesos = data.get("pesos", [])
-        foto_confirmacion = data.get("foto_confirmacion", "Sin foto")
-        
-        # Convertir lista de pesos a string JSON
-        import json
-        pesos_json = json.dumps(pesos)
-        
-        # Insertar registro
+
+        # Insertar registro con la nueva estructura simplificada
         await conn.execute('''
             INSERT INTO operario_fijo_granja (
-                telegram_id, cedula, cantidad_pesajes, lechones_por_pesaje, total_lechones,
-                peso_total, peso_promedio_por_lechon, peso_promedio_por_pesaje,
-                pesos_detalle, foto_confirmacion
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                telegram_user_id, cedula, cantidad_lechones, peso_total,
+                peso_promedio, edad_promedio, fotos_urls, fecha
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
         ''',
-            data.get('telegram_id'),
+            data.get('telegram_user_id'),
             data.get('cedula'),
-            data.get('cantidad_pesajes'),
-            data.get('lechones_por_pesaje'),
-            total_lechones,
-            peso_total,
-            peso_promedio_lechon,
-            peso_promedio_pesaje,
-            pesos_json,
-            foto_confirmacion
+            data.get('cantidad_lechones'),
+            data.get('peso_total'),
+            peso_promedio,
+            data.get('edad_promedio'),
+            data.get('foto_remision', 'Sin foto')
         )
-        
+
         print("✅ Registro de Sitio 1 guardado en base de datos")
     except Exception as e:
         print(f"⚠️ Error guardando en base de datos: {e}")
@@ -3000,18 +2709,20 @@ async def guardar_registro_sitio1(data: dict, peso_total: float, peso_promedio_l
         if conn:
             await release_db_connection(conn)
 
-async def enviar_notificacion_grupo_sitio1(data: dict, peso_total: float, peso_promedio_lechon: float, peso_promedio_pesaje: float, total_lechones: int):
+async def enviar_notificacion_grupo_sitio1(data: dict, peso_promedio: float):
     """Envía notificación al grupo de Telegram"""
     if not GROUP_CHAT_ID:
         print("⚠️ GROUP_CHAT_ID no configurado. No se enviará notificación.")
         return
 
     try:
-        pesos = data.get("pesos", [])
-        foto_confirmacion = data.get("foto_confirmacion", "Sin foto")
-        cantidad_pesajes = data.get('cantidad_pesajes')
-        lechones_por_pesaje = data.get('lechones_por_pesaje')
-        
+        nombre_operario = data.get("nombre_operario", "")
+        cedula = data.get("cedula")
+        cantidad_lechones = data.get("cantidad_lechones")
+        peso_total = data.get("peso_total")
+        edad_promedio = data.get("edad_promedio")
+        foto_remision = data.get("foto_remision", "Sin foto")
+
         # Crear mensaje
         mensaje = "🐷 *NUEVO REGISTRO - OPERARIO SITIO 1*\n"
         mensaje += "#Sitio1 #Lechones\n\n"
@@ -3019,22 +2730,16 @@ async def enviar_notificacion_grupo_sitio1(data: dict, peso_total: float, peso_p
         timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
         mensaje += f"📅 Fecha: {timestamp}\n\n"
 
-        mensaje += f"👤 Cédula: *{data.get('cedula')}*\n"
-        mensaje += f"📦 Pesajes registrados: *{cantidad_pesajes}*\n"
-        mensaje += f"🐷 Lechones por pesaje: *{lechones_por_pesaje}*\n"
-        mensaje += f"🐷 Total de lechones: *{total_lechones}*\n"
+        mensaje += f"👤 Operario: *{nombre_operario}*\n"
+        mensaje += f"🆔 Cédula: *{cedula}*\n"
+        mensaje += f"🐷 Cantidad de lechones: *{cantidad_lechones}*\n"
         mensaje += f"⚖️ Peso total: *{peso_total:,.2f} kg*\n"
-        mensaje += f"📊 Peso promedio por lechón: *{peso_promedio_lechon:,.2f} kg*\n"
-        mensaje += f"📊 Peso promedio por pesaje: *{peso_promedio_pesaje:,.2f} kg*\n\n"
-        
-        mensaje += "*DETALLE POR PESAJE:*\n"
-        for i, peso in enumerate(pesos, 1):
-            peso_por_lechon = peso / lechones_por_pesaje
-            mensaje += f"Pesaje #{i}: {peso:,.2f} kg ({peso_por_lechon:,.2f} kg/lechón)\n"
-        
-        if foto_confirmacion and foto_confirmacion != "Sin foto":
-            mensaje += f"\n📸 [Ver foto de confirmación]({foto_confirmacion})"
-        
+        mensaje += f"📊 Peso promedio por lechón: *{peso_promedio:,.2f} kg*\n"
+        mensaje += f"📅 Edad promedio: *{edad_promedio} días*\n"
+
+        if foto_remision and foto_remision != "Sin foto":
+            mensaje += f"\n📸 [Ver foto de remisión]({foto_remision})"
+
         # Enviar mensaje
         await bot.send_message(
             chat_id=GROUP_CHAT_ID,
@@ -3042,26 +2747,7 @@ async def enviar_notificacion_grupo_sitio1(data: dict, peso_total: float, peso_p
             parse_mode="Markdown"
         )
 
-        # Enviar TODAS las fotos como archivos adjuntos
-        if fotos_locales:
-            for i, foto_path in enumerate(fotos_locales, 1):
-                if foto_path and os.path.exists(foto_path):
-                    try:
-                        # Calcular cuántos lechones hay en este grupo
-                        lechones_pesados = (i - 1) * lechones_por_grupo
-                        lechones_en_este_grupo = min(lechones_por_grupo, cantidad_lechones - lechones_pesados)
-
-                        with open(foto_path, 'rb') as photo:
-                            await bot.send_photo(
-                                chat_id=GROUP_CHAT_ID,
-                                photo=types.BufferedInputFile(photo.read(), filename=f"pesaje_{i}.jpg"),
-                                caption=f"📸 Pesaje #{i} - {pesos[i-1]:,.2f} kg ({lechones_en_este_grupo} lechones)"
-                            )
-                        print(f"✅ Foto del pesaje #{i} enviada al grupo")
-                    except Exception as e_foto:
-                        print(f"⚠️ Error enviando foto del pesaje #{i}: {e_foto}")
-
-        print("✅ Notificación completa de Sitio 1 enviada al grupo")
+        print("✅ Notificación de Sitio 1 enviada al grupo")
 
     except Exception as e:
         print(f"⚠️ Error enviando notificación al grupo: {e}")
