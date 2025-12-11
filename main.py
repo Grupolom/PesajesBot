@@ -240,6 +240,7 @@ class RegistroState(StatesGroup):
     descarga_confirmar_rango = State()
     descarga_numero_lote = State()
     descarga_confirmar_lote = State()
+    descarga_agregar_mas = State()
 
     # Estados para Ingreso concentrado en silo (antes Medición de Silos)
     medicion_cedula = State()
@@ -355,6 +356,41 @@ class OperarioSitio1State(StatesGroup):
     edad_promedio = State()  # ¿Cuál es la edad promedio?
     foto_remision = State()  # Manda foto de la remisión
 
+# ==================== FORMATEO DE NÚMEROS ==================== #
+def formato_miles(numero, decimales=2):
+    """
+    Formatea un número al estilo colombiano/español:
+    - Punto (.) como separador de miles
+    - Coma (,) como separador de decimales
+
+    Ejemplo: 90421.5 → "90.421,50"
+             90421 → "90.421,00" (con decimales=2)
+             90421 → "90.421" (con decimales=0)
+    """
+    if numero is None:
+        return "0"
+
+    try:
+        numero = float(numero)
+        # Primero formateamos con el estilo anglosajón
+        if decimales > 0:
+            formatted = f"{numero:,.{decimales}f}"
+        else:
+            formatted = f"{numero:,.0f}"
+
+        # Luego intercambiamos: coma → temporal, punto → coma, temporal → punto
+        formatted = formatted.replace(",", "TEMP").replace(".", ",").replace("TEMP", ".")
+        return formatted
+    except (ValueError, TypeError):
+        return str(numero)
+
+def formato_entero(numero):
+    """
+    Formatea un número entero con separador de miles (punto).
+    Ejemplo: 90421 → "90.421"
+    """
+    return formato_miles(numero, decimales=0)
+
 # ==================== VALIDACIONES ==================== #
 def validar_cedula(valor):
     return valor.isdigit()
@@ -381,24 +417,37 @@ def validar_numero_entero(valor: str, minimo: int = 1, maximo: int = 10000) -> t
     except ValueError:
         return False, 0, "Debe ingresar un número entero válido"
 
-def validar_galones(valor: str) -> tuple[bool, float, str]:
+def validar_cantidad_decimal(valor: str, unidad: str = "galones", maximo: float = 100000) -> tuple[bool, float, str]:
     """
-    Valida cantidad de galones: número positivo, puede tener decimales
+    Valida cantidad decimal: número positivo, puede tener decimales
     Retorna: (es_valido, cantidad, mensaje_error)
+
+    Parámetros:
+    - valor: string con el valor a validar
+    - unidad: "galones", "kilos", etc. (para el mensaje de error)
+    - maximo: valor máximo permitido
     """
     try:
         # Reemplazar coma por punto para decimales
         valor_limpio = valor.replace(",", ".")
-        galones = float(valor_limpio)
-        
-        if galones <= 0:
+        cantidad = float(valor_limpio)
+
+        if cantidad <= 0:
             return False, 0, "La cantidad debe ser mayor a 0"
-        if galones > 100000:
-            return False, 0, "La cantidad no puede superar 100,000 galones"
-        
-        return True, galones, ""
+        if cantidad > maximo:
+            return False, 0, f"La cantidad no puede superar {formato_entero(int(maximo))} {unidad}"
+
+        return True, cantidad, ""
     except ValueError:
         return False, 0, "Debe ingresar un número válido (puede usar decimales con coma o punto)"
+
+def validar_galones(valor: str) -> tuple[bool, float, str]:
+    """Valida cantidad de galones (wrapper para compatibilidad)"""
+    return validar_cantidad_decimal(valor, unidad="galones", maximo=100000)
+
+def validar_kilos(valor: str) -> tuple[bool, float, str]:
+    """Valida cantidad de kilos"""
+    return validar_cantidad_decimal(valor, unidad="kilos", maximo=100000)
 
 def validar_peso(valor):
     return re.fullmatch(r"^\d+(,\d+)?$", valor)
@@ -1688,10 +1737,24 @@ async def confirmar_num_animales(message: types.Message, state: FSMContext):
     if "1" in texto or "confirmar" in texto:
         data = await state.get_data()
         cantidad = data.get("num_animales_temp")
+        tipo_carga = data.get("tipo_carga")
         await state.update_data(num_animales=cantidad)
-        
-        # Continuar al siguiente paso: selección de báscula
-        await preguntar_bascula(message, state)
+
+        # Si es Lechones, asignar Finca Tranquera automáticamente y saltar a peso
+        if tipo_carga == "Lechones":
+            await state.update_data(bascula="Finca Tranquera")
+            await message.answer(
+                f"✅ Cantidad: *{formato_entero(cantidad)}* lechones\n"
+                f"🏢 Báscula: *Finca Tranquera*\n\n"
+                f"¿Cuánto pesa? _(en kilogramos)_\n"
+                f"_(Puede usar decimales con coma)_",
+                reply_markup=ReplyKeyboardRemove(),
+                parse_mode="Markdown"
+            )
+            await state.set_state(ConductoresState.peso)
+        else:
+            # Para Cerdos Gordos, preguntar báscula
+            await preguntar_bascula(message, state)
     else:
         await message.answer("⚠️ Opción no válida. Seleccione 1 para Confirmar o 2 para Modificar:")
 
@@ -1755,7 +1818,7 @@ async def procesar_cantidad_galones(message: types.Message, state: FSMContext):
         return
     
     await state.update_data(cantidad_galones_temp=galones)
-    await preguntar_confirmacion(message, f"{galones:,.2f} galones", "cantidad")
+    await preguntar_confirmacion(message, f"{formato_miles(galones)} galones", "cantidad")
     await state.set_state(ConductoresState.confirmar_cantidad_galones)
 
 @dp.message(ConductoresState.confirmar_cantidad_galones)
@@ -1909,14 +1972,14 @@ async def confirmar_tipo_alimento(message: types.Message, state: FSMContext):
 @dp.message(ConductoresState.kilos_comprados)
 async def procesar_kilos_comprados(message: types.Message, state: FSMContext):
     """Procesa los kilos comprados"""
-    es_valido, kilos, error = validar_galones(message.text.strip())
+    es_valido, kilos, error = validar_kilos(message.text.strip())
     
     if not es_valido:
         await message.answer(f"⚠️ {error}\n\nIntente nuevamente:")
         return
     
     await state.update_data(kilos_comprados_temp=kilos)
-    await preguntar_confirmacion(message, f"{kilos:,.2f} kg", "kilos comprados")
+    await preguntar_confirmacion(message, f"{formato_miles(kilos)} kg", "kilos comprados")
     await state.set_state(ConductoresState.confirmar_kilos_comprados)
 
 @dp.message(ConductoresState.confirmar_kilos_comprados)
@@ -1939,7 +2002,7 @@ async def confirmar_kilos_comprados(message: types.Message, state: FSMContext):
         await state.update_data(kilos_comprados=kilos)
         
         await message.answer(
-            f"✅ Kilos comprados: *{kilos:,.2f} kg*\n\n"
+            f"✅ Kilos comprados: *{formato_miles(kilos)} kg*\n\n"
             f"📸 Ahora envíe una *foto de la factura*:",
             parse_mode="Markdown"
         )
@@ -2194,14 +2257,14 @@ async def procesar_peso(message: types.Message, state: FSMContext):
         return
     
     await state.update_data(peso_temp=peso)
-    await preguntar_confirmacion(message, f"{peso:,.2f} kg", "peso")
+    await preguntar_confirmacion(message, f"{formato_miles(peso)} kg", "peso")
     await state.set_state(ConductoresState.confirmar_peso_input)
 
 @dp.message(ConductoresState.confirmar_peso_input)
 async def confirmar_peso_input(message: types.Message, state: FSMContext):
     """Confirma el peso o permite modificarlo"""
     texto = message.text.strip().lower()
-    
+
     if "2" in texto or "modificar" in texto:
         await message.answer(
             "¿Cuánto pesa? _(en kilogramos)_\n"
@@ -2211,7 +2274,7 @@ async def confirmar_peso_input(message: types.Message, state: FSMContext):
         )
         await state.set_state(ConductoresState.peso)
         return
-    
+
     if "1" in texto or "confirmar" in texto:
         data = await state.get_data()
         peso = data.get("peso_temp")
@@ -2220,13 +2283,13 @@ async def confirmar_peso_input(message: types.Message, state: FSMContext):
 
         if es_peso_vacio:
             await message.answer(
-                f"✅ Peso: *{peso:,.2f} kg*\n\n"
+                f"✅ Peso: *{formato_miles(peso)} kg*\n\n"
                 f"Ponga foto de báscula:",
                 parse_mode="Markdown"
             )
         else:
             await message.answer(
-                f"✅ Peso: *{peso:,.2f} kg*\n\n"
+                f"✅ Peso: *{formato_miles(peso)} kg*\n\n"
                 f"📸 Ahora envíe una *foto del pesaje*:",
                 parse_mode="Markdown"
             )
@@ -2313,28 +2376,28 @@ def crear_resumen_conductor(data: dict) -> str:
     lineas.append(f"📦 Carga: {data.get('tipo_carga')}")
     
     tipo_carga = data.get('tipo_carga')
-    
+
     if tipo_carga in ["Lechones", "Cerdos Gordos"]:
-        lineas.append(f"🐷 Cantidad: {data.get('num_animales')} animales")
-        
+        lineas.append(f"🐷 Cantidad: {formato_entero(data.get('num_animales'))} animales")
+
     elif tipo_carga == "Combustible":
         lineas.append(f"⛽ Tipo: {data.get('tipo_combustible')}")
-        lineas.append(f"📊 Galones: {data.get('cantidad_galones'):,.2f}")
-        
+        lineas.append(f"📊 Galones: {formato_miles(data.get('cantidad_galones'))}")
+
     elif tipo_carga == "Concentrado":
         lineas.append(f"📋 Número de factura: {data.get('numero_factura')}")
         lineas.append(f"📋 Tipo de alimento: {data.get('tipo_alimento')}")
-        lineas.append(f"📋 Kilos comprados: {data.get('kilos_comprados'):,.2f} kg")
-    
+        lineas.append(f"📋 Kilos comprados: {formato_miles(data.get('kilos_comprados'))} kg")
+
     lineas.append(f"🏢 Báscula: {data.get('bascula')}")
-    
+
     # Info especial de Bogotá
     if data.get('bascula') == "Bogotá":
-        lineas.append(f"✅ Cerdos vivos: {data.get('cerdos_vivos', 0)}")
+        lineas.append(f"✅ Cerdos vivos: {formato_entero(data.get('cerdos_vivos', 0))}")
         if data.get('cerdos_muertos', 0) > 0:
-            lineas.append(f"🚨 Cerdos muertos: {data.get('cerdos_muertos')}")
-    
-    lineas.append(f"⚖️ Peso: {data.get('peso'):,.2f} kg")
+            lineas.append(f"🚨 Cerdos muertos: {formato_entero(data.get('cerdos_muertos'))}")
+
+    lineas.append(f"⚖️ Peso: {formato_miles(data.get('peso'))} kg")
     
     return "\n".join(lineas)
 
@@ -2466,33 +2529,33 @@ async def enviar_notificacion_grupo_conductor(data: dict):
 
         # Detalles según tipo de carga
         if tipo_carga in ["Lechones", "Cerdos Gordos"]:
-            mensaje_lineas.append(f"🐷 Cantidad de animales: *{data.get('num_animales')}*")
+            mensaje_lineas.append(f"🐷 Cantidad de animales: *{formato_entero(data.get('num_animales'))}*")
 
         elif tipo_carga == "Combustible":
             mensaje_lineas.append(f"⛽ Tipo de combustible: *{data.get('tipo_combustible')}*")
-            mensaje_lineas.append(f"📊 Cantidad: *{data.get('cantidad_galones'):,.2f} galones*")
+            mensaje_lineas.append(f"📊 Cantidad: *{formato_miles(data.get('cantidad_galones'))} galones*")
 
         elif tipo_carga == "Concentrado":
             mensaje_lineas.append("📋 *DATOS DE FACTURA:*")
             mensaje_lineas.append(f"   • Número de factura: {data.get('numero_factura')}")
             mensaje_lineas.append(f"   • Tipo de alimento: {data.get('tipo_alimento')}")
-            mensaje_lineas.append(f"   • Kilos comprados: {data.get('kilos_comprados'):,.2f} kg")
+            mensaje_lineas.append(f"   • Kilos comprados: {formato_miles(data.get('kilos_comprados'))} kg")
 
         mensaje_lineas.append(f"\n🏢 Báscula: *{data.get('bascula')}*")
 
         # Información especial de Bogotá
         if data.get('bascula') == "Bogotá":
-            mensaje_lineas.append(f"✅ Cerdos vivos: *{data.get('cerdos_vivos', 0)}*")
+            mensaje_lineas.append(f"✅ Cerdos vivos: *{formato_entero(data.get('cerdos_vivos', 0))}*")
 
             cerdos_muertos = data.get('cerdos_muertos', 0)
             if cerdos_muertos > 0:
                 # ALERTA ESPECIAL EN MAYÚSCULAS CON EMOJIS
                 mensaje_lineas.append("\n" + "🔴" * 15)
                 mensaje_lineas.append(f"🚨 *¡¡¡ALERTA CRÍTICA!!!* 🚨")
-                mensaje_lineas.append(f"⚠️ *SE MURIERON {cerdos_muertos} CERDOS* ⚠️")
+                mensaje_lineas.append(f"⚠️ *SE MURIERON {formato_entero(cerdos_muertos)} CERDOS* ⚠️")
                 mensaje_lineas.append("🔴" * 15 + "\n")
 
-        mensaje_lineas.append(f"⚖️ Peso registrado: *{data.get('peso'):,.2f} kg*")
+        mensaje_lineas.append(f"⚖️ Peso registrado: *{formato_miles(data.get('peso'))} kg*")
 
         mensaje = "\n".join(mensaje_lineas)
 
@@ -2529,7 +2592,7 @@ async def enviar_notificacion_grupo_conductor(data: dict):
                         await bot.send_photo(
                             chat_id=GROUP_CHAT_ID,
                             photo=types.BufferedInputFile(photo.read(), filename="pesaje.jpg"),
-                            caption=f"📸 Foto de Pesaje - {data.get('placa')} - {data.get('peso'):,.2f} kg"
+                            caption=f"📸 Foto de Pesaje - {data.get('placa')} - {formato_miles(data.get('peso'))} kg"
                         )
                     print("✅ Foto de pesaje enviada al grupo")
                 except Exception as e_pesaje:
@@ -2607,7 +2670,7 @@ async def procesar_peso_total_sitio1(message: types.Message, state: FSMContext):
     await state.update_data(peso_total=peso)
 
     await message.answer(
-        f"✅ Peso total: *{peso:,.2f} kg*\n\n"
+        f"✅ Peso total: *{formato_miles(peso)} kg*\n\n"
         "📅 ¿Cuál es la edad promedio de los lechones? (en días)",
         parse_mode="Markdown"
     )
@@ -2685,9 +2748,9 @@ async def finalizar_registro_sitio1(message: types.Message, state: FSMContext):
     resumen = f"✅ *REGISTRO COMPLETADO*\n\n"
     resumen += f"👤 Operario: *{nombre_operario}*\n"
     resumen += f"🆔 Cédula: *{cedula}*\n"
-    resumen += f"🐷 Cantidad de lechones: *{cantidad_lechones}*\n"
-    resumen += f"⚖️ Peso total: *{peso_total:,.2f} kg*\n"
-    resumen += f"📊 Peso promedio por lechón: *{peso_promedio:,.2f} kg*\n"
+    resumen += f"🐷 Cantidad de lechones: *{formato_entero(cantidad_lechones)}*\n"
+    resumen += f"⚖️ Peso total: *{formato_miles(peso_total)} kg*\n"
+    resumen += f"📊 Peso promedio por lechón: *{formato_miles(peso_promedio)} kg*\n"
     resumen += f"📅 Edad promedio: *{edad_promedio} días*\n"
 
     await message.answer(resumen, parse_mode="Markdown")
@@ -2748,9 +2811,9 @@ async def enviar_notificacion_grupo_sitio1(data: dict, peso_promedio: float):
 
         mensaje += f"👤 Operario: *{nombre_operario}*\n"
         mensaje += f"🆔 Cédula: *{cedula}*\n"
-        mensaje += f"🐷 Cantidad de lechones: *{cantidad_lechones}*\n"
-        mensaje += f"⚖️ Peso total: *{peso_total:,.2f} kg*\n"
-        mensaje += f"📊 Peso promedio por lechón: *{peso_promedio:,.2f} kg*\n"
+        mensaje += f"🐷 Cantidad de lechones: *{formato_entero(cantidad_lechones)}*\n"
+        mensaje += f"⚖️ Peso total: *{formato_miles(peso_total)} kg*\n"
+        mensaje += f"📊 Peso promedio por lechón: *{formato_miles(peso_promedio)} kg*\n"
         mensaje += f"📅 Edad promedio: *{edad_promedio} días*\n"
 
         if foto_remision and foto_remision != "Sin foto":
@@ -2906,7 +2969,7 @@ async def sitio3_get_banda(message: types.Message, state: FSMContext):
     await state.update_data(sitio3_banda_temp=banda)
 
     await message.answer(
-        "📍 ¿En qué corrales van a ubicarse los lechones?\n\n"
+        "📍 ¿En dónde están ubicados los animales?\n\n"
         "Por favor ingrese el rango en formato: *#-#*\n\n"
         "⚠️ _Máximo 9 corrales por registro_\n\n"
         "*Ejemplos válidos:*\n"
@@ -2916,6 +2979,54 @@ async def sitio3_get_banda(message: types.Message, state: FSMContext):
         parse_mode="Markdown"
     )
     await state.set_state(RegistroState.sitio3_rango_corrales)
+
+def obtener_corrales_usados(corrales_registrados: list) -> set:
+    """
+    Obtiene todos los números de corrales ya usados en la sesión actual.
+    Retorna un set con todos los números individuales.
+    """
+    corrales_usados = set()
+    for corral in corrales_registrados:
+        rango = corral.get('rango', '')
+        if '-' in rango:
+            partes = rango.split('-')
+            try:
+                inicio = int(partes[0])
+                fin = int(partes[1])
+                for i in range(inicio, fin + 1):
+                    corrales_usados.add(i)
+            except ValueError:
+                pass
+    return corrales_usados
+
+def validar_corrales_no_repetidos(rango_nuevo: str, corrales_usados: set) -> tuple[bool, str]:
+    """
+    Valida que el nuevo rango no contenga corrales ya usados.
+    Retorna: (es_valido, mensaje_error)
+    """
+    if '-' not in rango_nuevo:
+        return False, "Formato incorrecto"
+
+    partes = rango_nuevo.split('-')
+    try:
+        inicio = int(partes[0])
+        fin = int(partes[1])
+
+        # Verificar si algún corral del nuevo rango ya está usado
+        corrales_repetidos = []
+        for i in range(inicio, fin + 1):
+            if i in corrales_usados:
+                corrales_repetidos.append(str(i))
+
+        if corrales_repetidos:
+            if len(corrales_repetidos) == 1:
+                return False, f"El corral {corrales_repetidos[0]} ya fue registrado en esta sesión"
+            else:
+                return False, f"Los corrales {', '.join(corrales_repetidos)} ya fueron registrados en esta sesión"
+
+        return True, ""
+    except ValueError:
+        return False, "Error al procesar los números"
 
 # PASO 3: Rango de Corrales (sin confirmación intermedia)
 @dp.message(RegistroState.sitio3_rango_corrales)
@@ -2935,6 +3046,25 @@ async def sitio3_get_rango(message: types.Message, state: FSMContext):
             parse_mode="Markdown"
         )
         return
+
+    # Validar que no se repitan corrales ya registrados en esta sesión
+    data = await state.get_data()
+    corrales_registrados = data.get('sitio3_corrales', [])
+
+    if corrales_registrados:
+        corrales_usados = obtener_corrales_usados(corrales_registrados)
+        es_valido_repetidos, error_repetidos = validar_corrales_no_repetidos(rango, corrales_usados)
+
+        if not es_valido_repetidos:
+            # Mostrar qué corrales ya están usados
+            corrales_usados_str = ', '.join(map(str, sorted(corrales_usados)))
+            await message.answer(
+                f"⚠️ {error_repetidos}\n\n"
+                f"📋 *Corrales ya registrados en esta sesión:* {corrales_usados_str}\n\n"
+                "Por favor ingrese un rango de corrales diferente:",
+                parse_mode="Markdown"
+            )
+            return
 
     # Guardar rango y pasar a tipo de comida
     await state.update_data(sitio3_rango_temp=rango)
@@ -3036,7 +3166,7 @@ async def sitio3_resumen_confirmacion(message: types.Message, state: FSMContext)
     elif respuesta == "1":
         # Editar corrales
         await message.answer(
-            "📍 ¿En qué corrales van a ubicarse los lechones?\n\n"
+            "📍 ¿En dónde están ubicados los animales?\n\n"
             "Por favor ingrese el rango en formato: *#-#*\n\n"
             "⚠️ _Máximo 9 corrales por registro_\n\n"
             "Ejemplo: `1-9`",
@@ -3497,9 +3627,57 @@ async def descarga_confirmar_lote_si(message: types.Message, state: FSMContext):
 
     await message.answer(resumen_usuario, parse_mode="Markdown")
 
-    # Finalizar flujo
+    # Preguntar si desea registrar otra descarga
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="✅ Sí, nueva descarga")
+    builder.button(text="❌ No, finalizar")
+    builder.adjust(2)
+
+    await message.answer(
+        "¿Desea registrar otra descarga de lechones?",
+        reply_markup=builder.as_markup(resize_keyboard=True)
+    )
+    await state.set_state(RegistroState.descarga_agregar_mas)
+
+@dp.message(RegistroState.descarga_agregar_mas, F.text.in_(["✅ Sí, nueva descarga", "Sí", "Si", "1"]))
+async def descarga_agregar_otra(message: types.Message, state: FSMContext):
+    """Usuario quiere registrar otra descarga de lechones"""
+    # Limpiar datos de la descarga anterior pero mantener cédula y nombre
+    data = await state.get_data()
+    cedula = data.get('descarga_cedula')
+    nombre_operario = data.get('nombre_operario')
+
+    # Reiniciar solo los datos de la descarga
+    await state.update_data(
+        descarga_cantidad=None,
+        descarga_rango=None,
+        descarga_lote=None
+    )
+
+    await message.answer(
+        "🐷 Ingrese la cantidad de lechones\n\n"
+        "⚠️ Nota: Los lechones son cerdos jóvenes que\n"
+        "están llegando a la granja.\n\n"
+        "Cantidad:",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await state.set_state(RegistroState.descarga_cantidad_lechones)
+
+@dp.message(RegistroState.descarga_agregar_mas, F.text.in_(["❌ No, finalizar", "No", "2"]))
+async def descarga_finalizar(message: types.Message, state: FSMContext):
+    """Usuario finaliza el registro de descargas"""
+    await message.answer(
+        "✅ *Registro de descargas completado*",
+        parse_mode="Markdown",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
     await asyncio.sleep(1)
     await finalizar_flujo(message, state)
+
+@dp.message(RegistroState.descarga_agregar_mas)
+async def descarga_agregar_mas_invalido(message: types.Message, state: FSMContext):
+    """Handler para respuestas inválidas"""
+    await message.answer("⚠️ Por favor seleccione una opción válida usando los botones.")
 
 @dp.message(RegistroState.descarga_confirmar_lote, F.text == "2")
 async def descarga_confirmar_lote_no(message: types.Message, state: FSMContext):
@@ -3748,7 +3926,7 @@ async def medicion_get_peso_descargue(message: types.Message, state: FSMContext)
 
     await message.answer(
         f"⚖️ Silo {silo} - Peso de descargue:\n"
-        f"*{peso:,.2f} kilos*\n\n"
+        f"*{formato_miles(peso)} kilos*\n\n"
         "¿Es correcto?\n\n"
         "1️⃣ Sí, confirmar\n"
         "2️⃣ No, editar\n\n"
@@ -3832,7 +4010,7 @@ async def medicion_guardar_foto_factura(message: types.Message, state: FSMContex
         resumen = f"✅ *Silo {silo} registrado correctamente*\n\n"
         resumen += "📊 *Resumen hasta ahora:*\n\n"
         for s in silos_procesados:
-            resumen += f"✅ Silo {s['numero']}: {s['peso_descargue']:,.2f} kg - {s['tipo_comida']}\n"
+            resumen += f"✅ Silo {s['numero']}: {formato_miles(s['peso_descargue'])} kg - {s['tipo_comida']}\n"
 
         resumen += f"\n📝 *Total de silos registrados: {len(silos_procesados)}*"
 
@@ -3948,12 +4126,12 @@ async def medicion_finalizar_registro(message: types.Message, state: FSMContext)
                 mensaje_grupo += (
                     f"🔹 *SILO {silo['numero']}*\n"
                     f"   Tipo: {silo['tipo_comida']}\n"
-                    f"   Peso: {silo['peso_descargue']:,.2f} kg\n\n"
+                    f"   Peso: {formato_miles(silo['peso_descargue'])} kg\n\n"
                 )
 
             mensaje_grupo += (
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🏋️ *TOTAL INGRESADO: {total_kilos:,.2f} kilos*"
+                f"🏋️ *TOTAL INGRESADO: {formato_miles(total_kilos)} kilos*"
             )
 
             await bot.send_message(GROUP_CHAT_ID, mensaje_grupo, parse_mode="Markdown")
@@ -3967,7 +4145,7 @@ async def medicion_finalizar_registro(message: types.Message, state: FSMContext)
                             await bot.send_photo(
                                 chat_id=GROUP_CHAT_ID,
                                 photo=types.BufferedInputFile(photo.read(), filename=f"factura_silo{silo['numero']}.jpg"),
-                                caption=f"📸 Factura Silo {silo['numero']} - {silo['peso_descargue']:,.2f} kg"
+                                caption=f"📸 Factura Silo {silo['numero']} - {formato_miles(silo['peso_descargue'])} kg"
                             )
                 except Exception as e_foto:
                     print(f"⚠️ Error enviando foto del Silo {silo['numero']}: {e_foto}")
@@ -3983,7 +4161,7 @@ async def medicion_finalizar_registro(message: types.Message, state: FSMContext)
         "📊 *Resumen:*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         f"• Silos procesados: {len(silos_procesados)}\n"
-        f"• Total ingresado: *{total_kilos:,.2f} kg*\n"
+        f"• Total ingresado: *{formato_miles(total_kilos)} kg*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "¡Felicidades! Ha registrado correctamente la información."
     )
@@ -4100,13 +4278,20 @@ async def celdas_confirmar_silo_invalido(message: types.Message, state: FSMConte
 @dp.message(RegistroState.celdas_saldo)
 async def celdas_get_saldo(message: types.Message, state: FSMContext):
     """Obtener saldo de celdas de carga"""
-    saldo = message.text.strip()
+    saldo_texto = message.text.strip()
 
-    if not saldo:
+    if not saldo_texto:
         await message.answer("⚠️ Por favor ingrese el saldo de las celdas.")
         return
 
-    await state.update_data(celdas_saldo=saldo)
+    # Intentar convertir a número para formatear, si no es número se guarda como texto
+    try:
+        saldo_numero = float(saldo_texto.replace(",", ".").replace(" ", ""))
+        saldo_formateado = formato_miles(saldo_numero)
+        await state.update_data(celdas_saldo=saldo_numero, celdas_saldo_formateado=saldo_formateado)
+    except ValueError:
+        saldo_formateado = saldo_texto
+        await state.update_data(celdas_saldo=saldo_texto, celdas_saldo_formateado=saldo_formateado)
 
     builder = ReplyKeyboardBuilder()
     builder.add(types.KeyboardButton(text="1"))
@@ -4114,7 +4299,7 @@ async def celdas_get_saldo(message: types.Message, state: FSMContext):
     builder.adjust(2)
 
     await message.answer(
-        f"📊 Saldo ingresado: *{saldo}*\n\n"
+        f"📊 Saldo ingresado: *{saldo_formateado}*\n\n"
         "¿Es correcto?\n\n"
         "1️⃣ Sí, confirmar\n"
         "2️⃣ No, editar\n\n"
@@ -4157,6 +4342,7 @@ async def celdas_recibir_foto(message: types.Message, state: FSMContext):
     cedula = data.get('celdas_cedula')
     silo = data.get('celdas_silo')
     saldo = data.get('celdas_saldo')
+    saldo_formateado = data.get('celdas_saldo_formateado', str(saldo))
 
     # Obtener la foto con mejor calidad
     photo = message.photo[-1]
@@ -4206,7 +4392,7 @@ async def celdas_recibir_foto(message: types.Message, state: FSMContext):
                 "━━━━━━━━━━━━━━━━━━━━\n\n"
                 f"👤 Cédula: {cedula}\n"
                 f"🏭 Silo: {silo}\n"
-                f"📊 Saldo: {saldo}\n"
+                f"📊 Saldo: {saldo_formateado}\n"
                 f"📅 Fecha: {fecha_hora}\n"
                 "━━━━━━━━━━━━━━━━━━━━"
             )
@@ -4238,7 +4424,7 @@ async def celdas_recibir_foto(message: types.Message, state: FSMContext):
 
     await message.answer(
         "✅ *Registro de celdas guardado exitosamente*\n\n"
-        f"📊 Silo {silo} - Saldo: {saldo}\n\n"
+        f"📊 Silo {silo} - Saldo: {saldo_formateado}\n\n"
         "¿Desea registrar otro silo?",
         parse_mode="Markdown",
         reply_markup=builder.as_markup(resize_keyboard=True)
@@ -4406,7 +4592,7 @@ async def combustible_get_galones(message: types.Message, state: FSMContext):
     builder.adjust(2)
 
     await message.answer(
-        f"⛽ Galones ingresados: *{galones:,.2f}*\n\n"
+        f"⛽ Galones ingresados: *{formato_miles(galones)}*\n\n"
         "¿Es correcto?\n\n"
         "1️⃣ Sí, confirmar\n"
         "2️⃣ No, editar\n\n"
@@ -4508,7 +4694,7 @@ async def guardar_registro_combustible_entrada(message: types.Message, state: FS
                 "━━━━━━━━━━━━━━━━━━━━\n\n"
                 f"👤 Cédula: {cedula}\n"
                 f"⛽ Tipo: {tipo}\n"
-                f"📦 Galones recibidos: {galones:,.2f}\n"
+                f"📦 Galones recibidos: {formato_miles(galones)}\n"
                 f"📅 Fecha: {fecha_hora}\n"
                 "━━━━━━━━━━━━━━━━━━━━"
             )
@@ -4523,7 +4709,7 @@ async def guardar_registro_combustible_entrada(message: types.Message, state: FS
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         f"• Tipo: {tipo}\n"
         f"• Movimiento: Entrada (Recepción)\n"
-        f"• Galones: {galones:,.2f}\n"
+        f"• Galones: {formato_miles(galones)}\n"
         "━━━━━━━━━━━━━━━━━━━━"
     )
 
@@ -4793,7 +4979,7 @@ async def combustible_confirmar_centro_si(message: types.Message, state: FSMCont
                 "━━━━━━━━━━━━━━━━━━━━\n\n"
                 f"👤 Cédula: {cedula}\n"
                 f"⛽ Tipo: {tipo}\n"
-                f"📦 Galones despachados: {galones:,.2f}\n"
+                f"📦 Galones despachados: {formato_miles(galones)}\n"
                 f"{detalle_equipo}\n"
                 f"📍 Centro de Costo: {centro_costo}\n"
                 f"📅 Fecha: {fecha_hora}\n"
@@ -4817,7 +5003,7 @@ async def combustible_confirmar_centro_si(message: types.Message, state: FSMCont
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         f"• Tipo: {tipo}\n"
         f"• Movimiento: Salida (Tanqueo)\n"
-        f"• Galones: {galones:,.2f}\n"
+        f"• Galones: {formato_miles(galones)}\n"
         f"• Equipo: {detalle}\n"
         f"• Centro de costo: {centro_costo}\n"
         "━━━━━━━━━━━━━━━━━━━━"
@@ -5626,9 +5812,9 @@ async def destino_terminar_silos(message: types.Message, state: FSMContext):
 
     if diferencia > 0.1:  # Tolerancia de 0.1 kg
         await message.answer(
-            f"⚠️ ADVERTENCIA: Falta descargar {peso_bascula - total_silos} kg\n"
-            f"Total silos: {total_silos} kg\n"
-            f"Peso báscula: {peso_bascula} kg\n\n"
+            f"⚠️ ADVERTENCIA: Falta descargar {formato_miles(peso_bascula - total_silos)} kg\n"
+            f"Total silos: {formato_miles(total_silos)} kg\n"
+            f"Peso báscula: {formato_miles(peso_bascula)} kg\n\n"
             f"Envíe la foto del pesaje:"
         )
 
@@ -5638,15 +5824,15 @@ async def destino_terminar_silos(message: types.Message, state: FSMContext):
                 mensaje_alerta = (
                     "🚨 *ALERTA DE DISCREPANCIA* 🚨\n"
                     "#Discrepancia\n\n"
-                    f"⚠️ Diferencia detectada: *{diferencia:.2f} kg*\n\n"
-                    f"📊 Peso báscula: *{peso_bascula:,.2f} kg*\n"
-                    f"📊 Total silos: *{total_silos:,.2f} kg*\n"
+                    f"⚠️ Diferencia detectada: *{formato_miles(diferencia)} kg*\n\n"
+                    f"📊 Peso báscula: *{formato_miles(peso_bascula)} kg*\n"
+                    f"📊 Total silos: *{formato_miles(total_silos)} kg*\n"
                     f"🚛 Placa: *{data.get('camion', 'N/A')}*\n"
                     f"👤 Cédula: *{data.get('cedula', 'N/A')}*\n\n"
                     "⚠️ Se requiere verificación"
                 )
                 await bot.send_message(GROUP_CHAT_ID, mensaje_alerta, parse_mode="Markdown")
-                print(f"✅ Alerta de discrepancia enviada al grupo ({diferencia:.2f} kg)")
+                print(f"✅ Alerta de discrepancia enviada al grupo ({formato_miles(diferencia)} kg)")
             except Exception as e:
                 print(f"⚠️ Error enviando alerta de discrepancia: {e}")
     else:
